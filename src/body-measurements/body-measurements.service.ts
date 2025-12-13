@@ -7,6 +7,15 @@ import { UpdateMeasurementDto } from './dtos/update-measurement.dto';
 export class BodyMeasurementsService {
   constructor(private readonly prismaService: PrismaService) {}
 
+  findMeasurementById(userId: number, measurementId: number) {
+    return this.prismaService.bodyMeasurement.findUnique({
+      where: {
+        id: measurementId,
+        userId,
+      },
+    });
+  }
+
   findMeasurements(userId: number) {
     return this.prismaService.bodyMeasurement.findMany({
       where: { userId },

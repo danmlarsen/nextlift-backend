@@ -30,6 +30,17 @@ export class BodyMeasurementsController {
     return this.bodyMeasurementsService.findMeasurements(user.id);
   }
 
+  @Get(':measurementId')
+  getMeasurementById(
+    @CurrentUser() user: AuthUser,
+    @Param('measurementId', ParseIntPipe) measurementId: number,
+  ) {
+    return this.bodyMeasurementsService.findMeasurementById(
+      user.id,
+      measurementId,
+    );
+  }
+
   @Post()
   createMeasurement(
     @CurrentUser() user: AuthUser,
