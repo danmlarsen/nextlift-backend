@@ -19,6 +19,7 @@ export class BodyMeasurementsService {
   findMeasurements(userId: number) {
     return this.prismaService.bodyMeasurement.findMany({
       where: { userId },
+      orderBy: { measuredAt: 'desc' },
     });
   }
 
