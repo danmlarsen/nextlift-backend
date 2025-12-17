@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateMeasurementDto } from './dtos/create-measurement.dto';
 import { UpdateMeasurementDto } from './dtos/update-measurement.dto';
@@ -7,13 +7,19 @@ import { UpdateMeasurementDto } from './dtos/update-measurement.dto';
 export class BodyMeasurementsService {
   constructor(private readonly prismaService: PrismaService) {}
 
-  findMeasurementById(userId: number, measurementId: number) {
-    return this.prismaService.bodyMeasurement.findUnique({
+  async findMeasurementById(userId: number, measurementId: number) {
+    const measurement = await this.prismaService.bodyMeasurement.findUnique({
       where: {
         id: measurementId,
         userId,
       },
     });
+
+    if (!measurement) {
+      throw new NotFoundException('Found no measurement by this id');
+    }
+
+    return measurement;
   }
 
   findMeasurements(userId: number) {
