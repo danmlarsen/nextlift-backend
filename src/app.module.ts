@@ -11,6 +11,7 @@ import { HealthModule } from './health/health.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { minutes, ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
+import { BodyMeasurementsModule } from './body-measurements/body-measurements.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { APP_GUARD } from '@nestjs/core';
     EmailModule,
     HealthModule,
     ScheduleModule.forRoot(),
+    BodyMeasurementsModule,
   ],
   controllers: [],
   providers: [
