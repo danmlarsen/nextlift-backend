@@ -73,8 +73,8 @@ export class WorkoutsController {
   @Get('calendar')
   getWorkoutCalendar(
     @CurrentUser() user: AuthUser,
-    @Query('from', new ParseDatePipe({ optional: true })) from?: Date,
-    @Query('to', new ParseDatePipe({ optional: true })) to?: Date,
+    @Query('from', new ParseDatePipe()) from: Date,
+    @Query('to', new ParseDatePipe()) to: Date,
   ) {
     return this.workoutQuery.getWorkoutCalendar(user.id, {
       from,

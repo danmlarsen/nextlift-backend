@@ -209,9 +209,9 @@ export class WorkoutQueryService {
 
   async getWorkoutCalendar(
     userId: number,
-    options?: {
-      from?: Date;
-      to?: Date;
+    options: {
+      from: Date;
+      to: Date;
     },
   ) {
     this.logger.info(`Fetching workout calendar for user`, { userId, options });
@@ -223,8 +223,8 @@ export class WorkoutQueryService {
       FROM "Workout"
       WHERE "userId" = ${userId}
         AND "status" = 'COMPLETED' 
-        ${options?.from ? Prisma.sql`AND w."startedAt" >= ${options.from}` : Prisma.empty}
-        ${options?.to ? Prisma.sql`AND w."startedAt" <= ${options.to}` : Prisma.empty}
+        ${options.from ? Prisma.sql`AND "startedAt" >= ${options.from}` : Prisma.empty}
+        ${options.to ? Prisma.sql`AND "startedAt" <= ${options.to}` : Prisma.empty}
       ORDER BY "startedAt" ASC
       `;
 
