@@ -5,6 +5,11 @@ export enum WorkoutSetType {
   FAILURE = 'failure',
 }
 
+export type ExerciseData = {
+  name: string;
+  category: string;
+};
+
 export type WorkoutSetData = {
   completed: boolean;
   weight: number | null;
@@ -14,5 +19,6 @@ export type WorkoutSetData = {
 };
 
 export type WorkoutExerciseData = {
+  exercise: ExerciseData;
   workoutSets: WorkoutSetData[];
 };

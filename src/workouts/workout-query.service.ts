@@ -73,56 +73,18 @@ export class WorkoutQueryService {
         ? rawResults[rawResults.length - 1].id
         : null;
 
-      const transformedResults = rawResults.map((workout) => {
-        const totalWeight = this.calculateExerciseTotalWeight(
+      const transformedResults = rawResults.map((workout) => ({
+        ...workout,
+        totalWeight: this.calculateExerciseTotalWeight(
           workout.workoutExercises,
-        );
-
-        const totalCompletedSets = this.calculateExerciseCompletedSets(
+        ),
+        totalCompletedSets: this.calculateExerciseCompletedSets(
           workout.workoutExercises,
-        );
-
-        const compressedWorkoutExercises = workout.workoutExercises.map(
-          (workoutExercise) => {
-            const completedSets = workoutExercise.workoutSets.reduce(
-              (sum, set) => (set.completed ? sum + 1 : sum),
-              0,
-            );
-
-            let bestSet: Partial<WorkoutSet | null> = null;
-            if (workoutExercise.exercise.category === 'strength') {
-              bestSet = workoutExercise.workoutSets.reduce((best, current) => {
-                const currentOneRM = calculateOneRepMax(
-                  current.weight!,
-                  current.reps!,
-                );
-                const bestOneRM = calculateOneRepMax(best.weight!, best.reps!);
-                return currentOneRM > bestOneRM ? current : best;
-              });
-            }
-            if (workoutExercise.exercise.category === 'cardio') {
-              bestSet = workoutExercise.workoutSets.reduce((best, current) =>
-                current.duration! > best.duration! ? current : best,
-              );
-            }
-
-            return {
-              exerciseName: workoutExercise.exercise.name,
-              sets: completedSets,
-              bestSet,
-            };
-          },
-        );
-
-        return {
-          ...workout,
-          totalWeight,
-          totalCompletedSets,
-          workoutExercises: compressedWorkoutExercises.filter(
-            (we) => we.sets > 0,
-          ),
-        };
-      });
+        ),
+        workoutExercises: this.compressWorkoutExercises(
+          workout.workoutExercises,
+        ).filter((we) => we.sets > 0),
+      }));
 
       return {
         success: true,
@@ -300,5 +262,37 @@ export class WorkoutQueryService {
         total + exercise.workoutSets?.filter((set) => !!set.completed)?.length,
       0,
     );
+  }
+
+  private compressWorkoutExercises(workoutExercises: WorkoutExerciseData[]) {
+    return workoutExercises.map((workoutExercise) => {
+      const completedSets = workoutExercise.workoutSets.reduce(
+        (sum, set) => (set.completed ? sum + 1 : sum),
+        0,
+      );
+
+      let bestSet: Partial<WorkoutSet | null> = null;
+      if (workoutExercise.exercise.category === 'strength') {
+        bestSet = workoutExercise.workoutSets.reduce((best, current) => {
+          const currentOneRM = calculateOneRepMax(
+            current.weight!,
+            current.reps!,
+          );
+          const bestOneRM = calculateOneRepMax(best.weight!, best.reps!);
+          return currentOneRM > bestOneRM ? current : best;
+        });
+      }
+      if (workoutExercise.exercise.category === 'cardio') {
+        bestSet = workoutExercise.workoutSets.reduce((best, current) =>
+          current.duration! > best.duration! ? current : best,
+        );
+      }
+
+      return {
+        exerciseName: workoutExercise.exercise.name,
+        sets: completedSets,
+        bestSet,
+      };
+    });
   }
 }
