@@ -207,8 +207,14 @@ export class WorkoutQueryService {
     }
   }
 
-  async getWorkoutCalendar(userId: number, year: number) {
-    this.logger.info(`Fetching workout calendar for user`, { userId, year });
+  async getWorkoutCalendar(
+    userId: number,
+    options?: {
+      from?: Date;
+      to?: Date;
+    },
+  ) {
+    this.logger.info(`Fetching workout calendar for user`, { userId, options });
     try {
       const workouts = await this.prismaService.$queryRaw<
         Array<{ id: number; startedAt: Date }>
@@ -217,7 +223,8 @@ export class WorkoutQueryService {
       FROM "Workout"
       WHERE "userId" = ${userId}
         AND "status" = 'COMPLETED' 
-        AND EXTRACT(YEAR FROM "startedAt") = ${year}
+        ${options?.from ? Prisma.sql`AND w."startedAt" >= ${options.from}` : Prisma.empty}
+        ${options?.to ? Prisma.sql`AND w."startedAt" <= ${options.to}` : Prisma.empty}
       ORDER BY "startedAt" ASC
       `;
 
@@ -231,7 +238,6 @@ export class WorkoutQueryService {
       }
       this.logger.error(`Failed to fetch workout calendar`, {
         userId,
-        year,
         error,
       });
       throw new InternalServerErrorException(

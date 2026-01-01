@@ -73,9 +73,13 @@ export class WorkoutsController {
   @Get('calendar')
   getWorkoutCalendar(
     @CurrentUser() user: AuthUser,
-    @Query('year', new ParseIntPipe()) year: number,
+    @Query('from', new ParseDatePipe({ optional: true })) from?: Date,
+    @Query('to', new ParseDatePipe({ optional: true })) to?: Date,
   ) {
-    return this.workoutQuery.getWorkoutCalendar(user.id, year);
+    return this.workoutQuery.getWorkoutCalendar(user.id, {
+      from,
+      to,
+    });
   }
 
   /**
