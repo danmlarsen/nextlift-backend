@@ -8,6 +8,7 @@ import { PinoLogger } from 'nestjs-pino';
 import { InjectPinoLogger } from 'nestjs-pino/InjectPinoLogger';
 import { calculateOneRepMax } from 'src/common/utils';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { WorkoutExerciseData } from './types/workout.types';
 
 @Injectable()
 export class WorkoutQueryService {
@@ -73,25 +74,12 @@ export class WorkoutQueryService {
         : null;
 
       const transformedResults = rawResults.map((workout) => {
-        const totalWeight = workout.workoutExercises.reduce(
-          (total, exercise) =>
-            total +
-            exercise.workoutSets.reduce(
-              (setTotal, curSet) =>
-                setTotal +
-                (curSet.completed
-                  ? (curSet.weight ?? 0) * (curSet.reps ?? 0)
-                  : 0),
-              0,
-            ),
-          0,
+        const totalWeight = this.calculateExerciseTotalWeight(
+          workout.workoutExercises,
         );
 
-        const totalCompletedSets = workout.workoutExercises.reduce(
-          (total, exercise) =>
-            total +
-            exercise.workoutSets?.filter((set) => !!set.completed)?.length,
-          0,
+        const totalCompletedSets = this.calculateExerciseCompletedSets(
+          workout.workoutExercises,
         );
 
         const compressedWorkoutExercises = workout.workoutExercises.map(
@@ -288,5 +276,29 @@ export class WorkoutQueryService {
         'Failed to fetch workout calendar',
       );
     }
+  }
+
+  private calculateExerciseTotalWeight(
+    exercises: WorkoutExerciseData[],
+  ): number {
+    return exercises.reduce(
+      (total, exercise) =>
+        total +
+        exercise.workoutSets.reduce(
+          (setTotal, curSet) =>
+            setTotal +
+            (curSet.completed ? (curSet.weight ?? 0) * (curSet.reps ?? 0) : 0),
+          0,
+        ),
+      0,
+    );
+  }
+
+  private calculateExerciseCompletedSets(exercises: WorkoutExerciseData[]) {
+    return exercises.reduce(
+      (total, exercise) =>
+        total + exercise.workoutSets?.filter((set) => !!set.completed)?.length,
+      0,
+    );
   }
 }
