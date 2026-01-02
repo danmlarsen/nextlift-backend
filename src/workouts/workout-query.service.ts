@@ -246,6 +246,55 @@ export class WorkoutQueryService {
     }
   }
 
+  async getWorkoutGraphData(
+    userId: number,
+    options: {
+      from: Date;
+      to: Date;
+    },
+  ) {
+    try {
+      const workouts = await this.prismaService.workout.findMany({
+        where: {
+          userId,
+          startedAt: {
+            gte: options.from,
+            lte: options.to,
+          },
+        },
+        include: {
+          workoutExercises: {
+            include: {
+              exercise: { select: { name: true, category: true } },
+              workoutSets: {
+                select: {
+                  type: true,
+                  reps: true,
+                  weight: true,
+                  duration: true,
+                  completed: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      const transformedResults = workouts.map((workout) => ({
+        startedAt: workout.startedAt,
+        totalVolume: this.calculateExerciseTotalWeight(
+          workout.workoutExercises,
+        ),
+      }));
+
+      return transformedResults;
+    } catch {
+      throw new InternalServerErrorException(
+        'Failed to fetch workout graph data',
+      );
+    }
+  }
+
   private calculateExerciseTotalWeight(
     exercises: WorkoutExerciseData[],
   ): number {

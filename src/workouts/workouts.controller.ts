@@ -66,7 +66,7 @@ export class WorkoutsController {
   }
 
   /**
-   * Get a workout calendar for a given year
+   * Get a workout calendar for a date range
    * @throws {401} Unauthorized.
    * @throws {400} Bad Request.
    */
@@ -77,6 +77,23 @@ export class WorkoutsController {
     @Query('to', new ParseDatePipe()) to: Date,
   ) {
     return this.workoutQuery.getWorkoutCalendar(user.id, {
+      from,
+      to,
+    });
+  }
+
+  /**
+   * Get a workout graph data for a date range
+   * @throws {401} Unauthorized.
+   * @throws {400} Bad Request.
+   */
+  @Get('graph')
+  getWorkoutGraphData(
+    @CurrentUser() user: AuthUser,
+    @Query('from', new ParseDatePipe()) from: Date,
+    @Query('to', new ParseDatePipe()) to: Date,
+  ) {
+    return this.workoutQuery.getWorkoutGraphData(user.id, {
       from,
       to,
     });
