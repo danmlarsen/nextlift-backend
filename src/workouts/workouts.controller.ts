@@ -88,15 +88,8 @@ export class WorkoutsController {
    * @throws {400} Bad Request.
    */
   @Get('graph')
-  getWorkoutGraphData(
-    @CurrentUser() user: AuthUser,
-    @Query('from', new ParseDatePipe()) from: Date,
-    @Query('to', new ParseDatePipe()) to: Date,
-  ) {
-    return this.workoutQuery.getWorkoutGraphData(user.id, {
-      from,
-      to,
-    });
+  getWorkoutGraphData(@CurrentUser() user: AuthUser) {
+    return this.workoutQuery.getWorkoutGraphData(user.id);
   }
 
   /**
