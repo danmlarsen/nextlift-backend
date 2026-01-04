@@ -247,7 +247,7 @@ export class WorkoutQueryService {
     }
   }
 
-  async getWorkoutGraphData(userId: number) {
+  async getWorkoutChartData(userId: number) {
     const oneYearAgo = new Date();
     oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
     try {

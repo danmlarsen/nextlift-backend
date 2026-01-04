@@ -83,13 +83,13 @@ export class WorkoutsController {
   }
 
   /**
-   * Get a workout graph data for a date range
+   * Get workout chart data
    * @throws {401} Unauthorized.
    * @throws {400} Bad Request.
    */
-  @Get('graph')
-  getWorkoutGraphData(@CurrentUser() user: AuthUser) {
-    return this.workoutQuery.getWorkoutGraphData(user.id);
+  @Get('chart')
+  getWorkoutChartData(@CurrentUser() user: AuthUser) {
+    return this.workoutQuery.getWorkoutChartData(user.id);
   }
 
   /**
