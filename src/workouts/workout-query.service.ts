@@ -9,7 +9,7 @@ import { InjectPinoLogger } from 'nestjs-pino/InjectPinoLogger';
 import { calculateOneRepMax } from 'src/common/utils';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { WorkoutExerciseData } from './types/workout.types';
-import { format } from 'date-fns';
+import { format, subMonths } from 'date-fns';
 
 @Injectable()
 export class WorkoutQueryService {
@@ -248,14 +248,12 @@ export class WorkoutQueryService {
   }
 
   async getWorkoutChartData(userId: number) {
-    const oneYearAgo = new Date();
-    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
     try {
       const workouts = await this.prismaService.workout.findMany({
         where: {
           userId,
           status: 'COMPLETED',
-          startedAt: { gte: oneYearAgo },
+          startedAt: { gte: subMonths(new Date(), 6) },
         },
         orderBy: { startedAt: 'asc' },
         include: {
@@ -339,7 +337,7 @@ export class WorkoutQueryService {
         return acc;
       }, new Map<string, { period: string; workouts: number; totalVolume: number }>());
 
-      // Get latest 8 periods for each aggregation
+      // Get latest periods for each aggregation
       const getLatestPeriods = (
         data: Map<
           string,
@@ -355,9 +353,9 @@ export class WorkoutQueryService {
       };
 
       return {
-        monthly: getLatestPeriods(dataByMonth, 8),
-        weekly: getLatestPeriods(dataByWeek, 8),
-        daily: getLatestPeriods(dataByDay, 8),
+        monthly: getLatestPeriods(dataByMonth, 6),
+        weekly: getLatestPeriods(dataByWeek, 6),
+        daily: getLatestPeriods(dataByDay, 6),
       };
     } catch {
       throw new InternalServerErrorException(
