@@ -1,0 +1,40 @@
+# fly.toml app configuration file generated for nextlift-backend on 2026-02-14T13:43:19+01:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'nextlift-backend'
+primary_region = 'arn'
+
+[build]
+  dockerfile = 'Dockerfile.prod'
+
+[deploy]
+  release_command = 'npx prisma migrate deploy'
+  seed_command = 'ts-node prisma/seed.ts'
+
+[env]
+  CORS_ORIGIN = 'https://nextlift.app,https://www.nextlift.app'
+  FRONTEND_URL = 'https://www.nextlift.app'
+  SENDGRID_VERIFIED_SENDER_EMAIL = 'no-reply@nextlift.app'
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[vm]]
+  memory = '256mb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 256
+
+[[http_service.checks]]
+  grace_period = "20s"
+  interval = "15s"
+  timeout = "5s"
+  method = "GET"
+  path = "/health"
