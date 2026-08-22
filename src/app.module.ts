@@ -23,7 +23,15 @@ import { BodyMeasurementsModule } from './body-measurements/body-measurements.mo
           process.env.NODE_ENV !== 'production'
             ? { target: 'pino-pretty', options: { colorize: true } }
             : undefined,
-        redact: ['req.headers.authorization', 'req.body.password'],
+        redact: [
+          'req.headers.authorization',
+          'req.headers.cookie',
+          'req.body.password',
+          'req.body.currentPassword',
+          'req.body.newPassword',
+          'req.body.captchaToken',
+          'req.body.refresh_token',
+        ],
         autoLogging: {
           ignore: (req) => req.url === '/health', // Don't log health checks
         },

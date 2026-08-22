@@ -29,41 +29,35 @@ export class UsersService {
     }
   }
 
-  async getAllUsers() {
-    this.logger.info(`Fetching all users`);
-    try {
-      return await this.prismaService.user.findMany();
-    } catch (error: unknown) {
-      if (error instanceof HttpException) {
-        throw error;
-      }
-      this.logger.error(`Failed to fetch all users`, { error });
-      throw new InternalServerErrorException('Failed to fetch all users');
-    }
-  }
-
   async createUser(data: Prisma.UserCreateInput) {
-    this.logger.info(`Creating a new user`, { data });
+    // Never log `data`: it carries the bcrypt password hash.
+    this.logger.info(`Creating a new user`, { email: data.email });
     try {
       return await this.prismaService.user.create({ data });
     } catch (error: unknown) {
       if (error instanceof HttpException) {
         throw error;
       }
-      this.logger.error(`Failed to create user`, { data, error });
+      this.logger.error(`Failed to create user`, { email: data.email, error });
       throw new InternalServerErrorException('Failed to create user');
     }
   }
 
   async updateUser(id: number, data: Prisma.UserUpdateInput) {
-    this.logger.info(`Updating user`, { id, data });
+    // Log only which fields changed, never their values (password / refresh
+    // token hashes flow through here).
+    this.logger.info(`Updating user`, { id, fields: Object.keys(data) });
     try {
       return await this.prismaService.user.update({ where: { id }, data });
     } catch (error: unknown) {
       if (error instanceof HttpException) {
         throw error;
       }
-      this.logger.error(`Failed to update user`, { id, data, error });
+      this.logger.error(`Failed to update user`, {
+        id,
+        fields: Object.keys(data),
+        error,
+      });
       throw new InternalServerErrorException('Failed to update user');
     }
   }

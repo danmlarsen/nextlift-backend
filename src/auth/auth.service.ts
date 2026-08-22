@@ -144,20 +144,20 @@ export class AuthService {
       });
 
       if (!token) {
-        this.logger.warn(`Invalid confirmation token`, { token: tokenString });
+        this.logger.warn(`Invalid confirmation token`);
         throw new UnauthorizedException('Invalid confirmation token');
       }
 
       if (token.expiresAt < new Date()) {
         this.logger.warn(`Confirmation token has expired`, {
-          token: tokenString,
+          userId: token.userId,
         });
         throw new UnauthorizedException('Confirmation token has expired');
       }
 
       if (token.isUsed) {
         this.logger.warn(`Confirmation token has already been used`, {
-          token: tokenString,
+          userId: token.userId,
         });
         throw new ConflictException('Token has already been used');
       }
@@ -192,10 +192,7 @@ export class AuthService {
       if (error instanceof HttpException) {
         throw error;
       }
-      this.logger.error(`Error during email confirmation`, {
-        token: tokenString,
-        error,
-      });
+      this.logger.error(`Error during email confirmation`, { error });
       throw new InternalServerErrorException('Failed to confirm email');
     }
   }
@@ -603,10 +600,7 @@ export class AuthService {
       if (error instanceof HttpException) {
         throw error;
       }
-      this.logger.error(`Error during password reset`, {
-        token: tokenString,
-        error,
-      });
+      this.logger.error(`Error during password reset`, { error });
       throw new InternalServerErrorException('Failed to reset password');
     }
   }
