@@ -74,7 +74,9 @@ export class AuthController {
       ),
     });
 
-    return { access_token, refresh_token, ...loginData };
+    // The refresh token is delivered only as the httpOnly cookie above; never
+    // return it in the JSON body where client-side JS (or an XSS) could read it.
+    return { access_token, ...loginData };
   }
 
   /**
@@ -117,7 +119,14 @@ export class AuthController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @Post('logout')
-  logout(@Res({ passthrough: true }) res: Response) {
+  async logout(
+    @CurrentUser() user: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    // Invalidate the session server-side so a captured refresh token can no
+    // longer be redeemed, not just clear the browser cookie.
+    await this.authService.logout(user.id);
+
     res.clearCookie(REFRESH_TOKEN_COOKIE, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',

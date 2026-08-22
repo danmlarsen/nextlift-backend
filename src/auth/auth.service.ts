@@ -338,17 +338,23 @@ export class AuthService {
   async login(user: UserResponseDto) {
     this.logger.info(`Logging in user`, { userId: user.id, email: user.email });
     try {
-      const payload = {
+      const payload: JwtPayload = {
         sub: user.id,
         email: user.email,
       };
 
-      const access_token = this.jwtService.sign(payload);
-      const refresh_token = this.jwtService.sign(payload, {
-        expiresIn: this.configService.get('JWT_REFRESH_EXP') || '30d',
+      const access_token = this.jwtService.sign({
+        ...payload,
+        type: 'access',
       });
+      const refresh_token = this.jwtService.sign(
+        { ...payload, type: 'refresh' },
+        {
+          expiresIn: this.configService.get('JWT_REFRESH_EXP') || '30d',
+        },
+      );
 
-      const hashedRefreshToken = await bcrypt.hash(refresh_token, 10);
+      const hashedRefreshToken = await this.hashRefreshToken(refresh_token);
       await this.usersService.updateUser(user.id, {
         refreshToken: hashedRefreshToken,
         lastLoginAt: new Date(),
@@ -377,9 +383,21 @@ export class AuthService {
     this.logger.info(`Attempting to refresh tokens`);
     let payload: JwtPayload;
     try {
-      payload = this.jwtService.decode(refreshToken);
+      // verifyAsync (not decode) enforces the signature and expiry, so an
+      // expired or tampered refresh token is rejected before any DB lookup.
+      payload = await this.jwtService.verifyAsync<JwtPayload>(refreshToken);
     } catch {
-      this.logger.warn(`Invalid refresh token decode attempt`);
+      this.logger.warn(`Invalid or expired refresh token`);
+      throw new UnauthorizedException('Invalid token');
+    }
+
+    // An access token must never be redeemed at the refresh endpoint. Legacy
+    // tokens issued before the type claim have no `type` and stay accepted
+    // through the migration window.
+    if (payload.type === 'access') {
+      this.logger.warn(`Access token presented to refresh endpoint`, {
+        userId: payload.sub,
+      });
       throw new UnauthorizedException('Invalid token');
     }
 
@@ -389,13 +407,16 @@ export class AuthService {
         this.logger.warn(
           `No user or refresh token found during token refresh`,
           {
-            payload,
+            userId: payload.sub,
           },
         );
         throw new UnauthorizedException('No user or token');
       }
 
-      const isValid = await bcrypt.compare(refreshToken, user.refreshToken);
+      const isValid = await this.isRefreshTokenMatch(
+        refreshToken,
+        user.refreshToken,
+      );
       if (!isValid) {
         this.logger.warn(`Invalid refresh token attempt`, { userId: user.id });
         throw new UnauthorizedException('Invalid refresh token');
@@ -408,21 +429,54 @@ export class AuthService {
         throw new UnauthorizedException('Account is disabled');
       }
 
-      const newPayload: JwtPayload = {
+      const access_token = this.jwtService.sign({
         sub: user.id,
         email: user.email,
-      };
+        type: 'access',
+      });
 
-      return {
-        access_token: this.jwtService.sign(newPayload),
-      };
+      return { access_token };
     } catch (error: unknown) {
       if (error instanceof HttpException) {
         throw error;
       }
-      this.logger.error(`Failed to refresh tokens`, { payload, error });
+      this.logger.error(`Failed to refresh tokens`, {
+        userId: payload.sub,
+        error,
+      });
       throw new InternalServerErrorException('Failed to refresh tokens');
     }
+  }
+
+  /**
+   * Null the stored refresh token so the current session can no longer be
+   * refreshed server-side (used by logout).
+   */
+  async logout(userId: number) {
+    await this.usersService.updateUser(userId, { refreshToken: null });
+  }
+
+  /**
+   * bcrypt only hashes the first 72 bytes of its input. Every JWT issued to a
+   * given user shares an identical 72-byte prefix (header + `sub`/`email`),
+   * so hashing the raw token would make all of a user's refresh tokens
+   * interchangeable. Hash a SHA-256 digest instead to bind the hash to the
+   * whole token.
+   */
+  private hashRefreshToken(token: string) {
+    const digest = crypto.createHash('sha256').update(token).digest('hex');
+    return bcrypt.hash(digest, 10);
+  }
+
+  private async isRefreshTokenMatch(token: string, storedHash: string) {
+    const digest = crypto.createHash('sha256').update(token).digest('hex');
+    if (await bcrypt.compare(digest, storedHash)) {
+      return true;
+    }
+    // Legacy fallback: tokens issued before SHA-256 pre-hashing were stored as
+    // bcrypt(rawToken). Safe to drop once all such tokens have expired.
+    // TODO(2026-09-30): remove the legacy raw-token comparison.
+    return bcrypt.compare(token, storedHash);
   }
 
   async requestPasswordReset(

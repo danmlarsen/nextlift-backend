@@ -9,8 +9,12 @@ import { EmailService } from 'src/email/email.service';
 import { Prisma, User } from '@prisma/client';
 import { RegisterUserDto } from './dtos/register-user.dto';
 import bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
 import { UnauthorizedException } from '@nestjs/common';
 import { EmailNotConfirmedException } from 'src/common/exceptions/email-not-confirmed-exception';
+
+const sha256hex = (value: string) =>
+  crypto.createHash('sha256').update(value).digest('hex');
 
 const mockPrismaService = {
   emailConfirmationToken: {
@@ -61,6 +65,16 @@ const mockEmailService = {
   sendPasswordResetEmail: jest.fn().mockResolvedValue(undefined),
 };
 
+const mockJwtService = {
+  sign: jest.fn(),
+  verifyAsync: jest.fn(),
+};
+
+const mockConfigService = {
+  get: jest.fn(),
+  getOrThrow: jest.fn(),
+};
+
 describe('AuthService', () => {
   let service: AuthService;
 
@@ -72,8 +86,8 @@ describe('AuthService', () => {
         AuthService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: UsersService, useValue: mockUsersService },
-        { provide: JwtService, useValue: {} },
-        { provide: ConfigService, useValue: {} },
+        { provide: JwtService, useValue: mockJwtService },
+        { provide: ConfigService, useValue: mockConfigService },
         { provide: EmailService, useValue: mockEmailService },
         {
           provide: 'PinoLogger:AuthService',
@@ -260,6 +274,137 @@ describe('AuthService', () => {
       await expect(service.validateUser(loginDto)).rejects.toThrow(
         UnauthorizedException,
       );
+    });
+  });
+
+  describe('login()', () => {
+    beforeEach(() => {
+      mockConfigService.get.mockReturnValue('30d');
+    });
+
+    it('signs access and refresh tokens carrying a type claim', async () => {
+      mockJwtService.sign
+        .mockReturnValueOnce('access-token-value')
+        .mockReturnValueOnce('refresh-token-value');
+
+      const result = await service.login(mockUser);
+
+      expect(mockJwtService.sign).toHaveBeenNthCalledWith(1, {
+        sub: mockUser.id,
+        email: mockUser.email,
+        type: 'access',
+      });
+      expect(mockJwtService.sign).toHaveBeenNthCalledWith(
+        2,
+        { sub: mockUser.id, email: mockUser.email, type: 'refresh' },
+        { expiresIn: '30d' },
+      );
+      expect(result.access_token).toBe('access-token-value');
+      expect(result.refresh_token).toBe('refresh-token-value');
+    });
+
+    it('stores the refresh token hashed via its SHA-256 digest, not the raw token', async () => {
+      mockJwtService.sign
+        .mockReturnValueOnce('access-token-value')
+        .mockReturnValueOnce('refresh-token-value');
+
+      let captured: string | undefined;
+      (mockUsersService.updateUser as jest.Mock).mockImplementationOnce(
+        (_id: number, data: { refreshToken: string }) => {
+          captured = data.refreshToken;
+          return Promise.resolve(mockUser);
+        },
+      );
+
+      await service.login(mockUser);
+
+      expect(captured).toBeDefined();
+      const stored = captured as string;
+      // The stored value validates against the SHA-256 digest of the token...
+      expect(
+        await bcrypt.compare(sha256hex('refresh-token-value'), stored),
+      ).toBe(true);
+      // ...but NOT against the raw token — proving bcrypt's 72-byte truncation
+      // can no longer make different tokens collide (N1).
+      expect(await bcrypt.compare('refresh-token-value', stored)).toBe(false);
+    });
+  });
+
+  describe('refreshTokens()', () => {
+    it('rejects an invalid or expired refresh token (verifyAsync throws)', async () => {
+      mockJwtService.verifyAsync.mockRejectedValueOnce(
+        new Error('jwt expired'),
+      );
+
+      await expect(service.refreshTokens('garbage')).rejects.toThrow(
+        'Invalid token',
+      );
+      expect(mockUsersService.getUser).not.toHaveBeenCalled();
+    });
+
+    it('rejects an access token presented to the refresh endpoint', async () => {
+      mockJwtService.verifyAsync.mockResolvedValueOnce({
+        sub: mockUser.id,
+        email: mockUser.email,
+        type: 'access',
+      });
+
+      await expect(service.refreshTokens('an-access-token')).rejects.toThrow(
+        'Invalid token',
+      );
+      expect(mockUsersService.getUser).not.toHaveBeenCalled();
+    });
+
+    it('issues a new access token for a valid refresh token', async () => {
+      const token = 'valid-refresh-token';
+      const storedHash = await bcrypt.hash(sha256hex(token), 10);
+      (mockUsersService.getUser as jest.Mock).mockResolvedValueOnce({
+        ...mockUser,
+        refreshToken: storedHash,
+      });
+      mockJwtService.verifyAsync.mockResolvedValueOnce({
+        sub: mockUser.id,
+        email: mockUser.email,
+        type: 'refresh',
+      });
+      mockJwtService.sign.mockReturnValueOnce('new-access-token');
+
+      const result = await service.refreshTokens(token);
+
+      expect(result.access_token).toBe('new-access-token');
+      expect(mockJwtService.sign).toHaveBeenCalledWith({
+        sub: mockUser.id,
+        email: mockUser.email,
+        type: 'access',
+      });
+    });
+
+    it('rejects an old refresh token whose hash no longer matches (rotation, N1)', async () => {
+      const currentToken = 'current-refresh-token';
+      const storedHash = await bcrypt.hash(sha256hex(currentToken), 10);
+      (mockUsersService.getUser as jest.Mock).mockResolvedValueOnce({
+        ...mockUser,
+        refreshToken: storedHash,
+      });
+      mockJwtService.verifyAsync.mockResolvedValueOnce({
+        sub: mockUser.id,
+        email: mockUser.email,
+        type: 'refresh',
+      });
+
+      await expect(service.refreshTokens('old-refresh-token')).rejects.toThrow(
+        'Invalid refresh token',
+      );
+    });
+  });
+
+  describe('logout()', () => {
+    it('nulls the stored refresh token for the user', async () => {
+      await service.logout(mockUser.id);
+
+      expect(mockUsersService.updateUser).toHaveBeenCalledWith(mockUser.id, {
+        refreshToken: null,
+      });
     });
   });
 });
