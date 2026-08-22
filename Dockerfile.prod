@@ -2,9 +2,11 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-COPY package.json pnpm-lock.yaml ./
+# pnpm-workspace.yaml carries the allowBuilds approvals; without it pnpm 11
+# aborts install/run with ERR_PNPM_IGNORED_BUILDS.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
-RUN npm install -g pnpm && pnpm install --frozen-lockfile
+RUN npm install -g pnpm@11.9.0 && pnpm install --frozen-lockfile
 
 COPY . .
 
@@ -16,12 +18,16 @@ FROM node:22-alpine AS production
 
 WORKDIR /app
 
-COPY package.json pnpm-lock.yaml ./
+ENV NODE_ENV=production
 
-# Install production dependencies AND prisma (needed for runtime)
-RUN npm install -g pnpm && \
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+
+# Install production dependencies AND the Prisma CLI (needed at runtime for
+# `prisma migrate deploy` and `prisma generate`). Pin the CLI to the same
+# version as @prisma/client so they never drift at build time.
+RUN npm install -g pnpm@11.9.0 && \
     pnpm install --frozen-lockfile --prod && \
-    pnpm add prisma
+    pnpm add prisma@6.19.3
 
 # Copy built application, Prisma schema and compiled seed.js
 COPY --from=builder /app/dist/src ./dist
@@ -30,6 +36,9 @@ COPY --from=builder /app/dist/prisma/seed.js ./prisma
 
 # Generate Prisma client in production (ensures compatibility)
 RUN npx prisma generate
+
+# Run as the unprivileged node user instead of root
+USER node
 
 EXPOSE 3000
 

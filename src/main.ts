@@ -34,6 +34,11 @@ async function bootstrap() {
     SwaggerModule.createDocument(app, swaggerConfig, documentOptions);
   SwaggerModule.setup('api', app, documentFactory, moduleOptions);
 
+  app.enableShutdownHooks();
+
   await app.listen(process.env.PORT ?? 3000, '0.0.0.0');
 }
-bootstrap();
+bootstrap().catch((error) => {
+  console.error('Fatal error during bootstrap', error);
+  process.exit(1);
+});
