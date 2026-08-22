@@ -1,107 +1,171 @@
-# NextLift Workout Tracker - Backend
+# NextLift Workout Tracker — Backend
 
-## About
-
-NextLift is a workout tracking application that helps users log exercises, track personal records, and monitor their progress over time. This REST API handles user authentication, workout management, exercise libraries, and personal record tracking.
-
-REST API backend for the NextLift workout tracking application built with NestJS and PostgreSQL/Prisma.
+REST API for the NextLift workout-tracking app: authentication, workouts,
+exercises, personal records, and body measurements. Built with NestJS,
+PostgreSQL and Prisma.
 
 ## Tech Stack
 
-- **Framework**: NestJS (Node.js)
+- **Framework**: NestJS 11 (Express platform)
 - **Language**: TypeScript
 - **Database**: PostgreSQL
-- **ORM**: Prisma
-- **Authentication**: JWT + Passport.js (Local & JWT strategies)
-- **Validation**: class-validator + class-transformer
-- **Logging**: Pino
-- **Email**: SendGrid
-- **Package Manager**: pnpm
+- **ORM**: Prisma 6
+- **Auth**: JWT + Passport (local & JWT strategies), refresh tokens in httpOnly cookies
+- **Validation**: class-validator + class-transformer (global `ValidationPipe`, `whitelist` + `forbidNonWhitelisted`)
+- **Rate limiting**: `@nestjs/throttler` (global) + per-IP demo limits
+- **Logging**: Pino (nestjs-pino), with credential redaction
+- **Email**: SendGrid (console-mock fallback when `SENDGRID_API_KEY` is unset)
+- **API docs**: Swagger at `/api` — enabled in development only
+- **Package manager**: pnpm (pinned via `packageManager`; **Node ≥ 22**)
+
+## API shape
+
+- All routes are URI-versioned under **`/v1`** (e.g. `POST /v1/auth/login`), except
+  `GET /health`, which is version-neutral.
+- Interactive Swagger UI and the raw spec (`/api`, `/api/json`) are served in
+  development only; in production they are disabled.
 
 ## Quick Start
 
-### Using Docker (Recommended)
+### Using Docker (recommended)
 
 ```bash
-# Start database + API + Prisma Studio
+# Start Postgres + API + Prisma Studio
 docker compose up
 
-# The API will be available at http://localhost:3000
-# Prisma Studio will be available at http://localhost:5555
+# API        -> http://localhost:3000
+# Prisma Studio -> http://localhost:5555
 ```
 
-### Local Development
+### Local development
 
 ```bash
-# Install dependencies
+# Install dependencies (pnpm is pinned; Node >= 22)
 pnpm install
 
-# Set up environment variables
+# Configure environment
 cp .env.example .env
 
-# Run database migrations
+# Apply migrations and seed the system data
 npx prisma migrate deploy
-
-# Seed the database
 npx prisma db seed
 
-# Start development server
+# Start the dev server (hot reload)
 pnpm start:dev
 ```
 
-## Development Scripts
+> **pnpm build approvals**: `pnpm-workspace.yaml` lists the dependencies whose
+> install scripts are allowed to run (`bcrypt`, `prisma`, `@prisma/client`, …).
+> pnpm 10+ blocks build scripts by default, so **do not delete that file** — without
+> it `pnpm install` aborts with `ERR_PNPM_IGNORED_BUILDS` and the Docker/CI build fails.
+
+## Scripts
 
 ```bash
-# Development
-pnpm start:dev          # Start with hot reload
-pnpm start:debug        # Start with debugger
+pnpm start:dev      # dev server with hot reload
+pnpm build          # production build (nest build)
+pnpm start:prod     # run the built server (node dist/main)
 
-# Database
-npx prisma migrate dev  # Create and apply migration
-npx prisma generate     # Generate Prisma client
-npx prisma studio       # Open Prisma Studio
-npx prisma db seed      # Seed database
+pnpm lint           # eslint --fix
+pnpm lint:check     # eslint, no fixes (used in CI)
+pnpm typecheck      # tsc --noEmit
+pnpm test           # unit tests (jest)
+pnpm test:e2e       # e2e tests (needs a running DB + JWT_SECRET)
 
-# Testing
-pnpm test              # Unit tests
-pnpm test:e2e          # End-to-end tests
-pnpm test:cov          # Test coverage
-
-# Build & Production
-pnpm build             # Build for production
-pnpm start:prod        # Start production server
+npx prisma migrate dev   # create + apply a migration
+npx prisma generate      # regenerate the Prisma client
+npx prisma studio        # open Prisma Studio
+npx prisma db seed       # seed system user + exercise library
 ```
 
 ## Project Structure
 
-- `src/auth/` - Authentication (JWT, local strategy)
-- `src/users/` - User management
-- `src/workouts/` - Workout CRUD operations
-- `src/exercises/` - Exercise management
-- `src/email/` - Email service integration
-- `src/prisma/` - Database service
-- `src/common/` - Shared utilities, guards, decorators
-- `prisma/` - Database schema and migrations
+- `src/auth/` — register, login, refresh, logout, email confirmation, password
+  reset, demo sessions (JWT + Passport)
+- `src/users/` — account management (deletion)
+- `src/workouts/` — workouts, workout-exercises and sets
+- `src/exercises/` — exercise library
+- `src/body-measurements/` — weight / body-fat / notes tracking
+- `src/email/` — SendGrid integration (with console-mock fallback)
+- `src/health/` — `/health` and (JWT-guarded) `/health/detailed`
+- `src/prisma/` — Prisma service
+- `src/config/` — environment validation
+- `src/common/` — guards, decorators, constants, shared types
+- `prisma/` — schema, migrations and seed
 
 ## Features
 
-- **JWT Authentication** with refresh tokens (HTTP-only cookies)
-- **Email confirmation** and password reset
-- **Workout tracking** with exercises and sets
-- **Personal records** tracking
-- **Exercise library** with seeded data
-- **Input validation** and sanitization
-- **Structured logging** with Pino
-- **Comprehensive testing** setup
+- JWT authentication with typed access/refresh tokens; refresh tokens are
+  httpOnly-cookie-only and hashed at rest, invalidated on logout
+- Email confirmation and password reset (enumeration-safe endpoints)
+- Workout tracking with exercises, sets and personal records
+- Body-measurement tracking
+- Seeded exercise library
+- Global rate limiting + per-IP demo-session limits + reCAPTCHA on demo login
+- Structured logging (Pino) with credential redaction
 
 ## Environment Variables
 
-Create a `.env` file with:
+See [`.env.example`](./.env.example). Summary:
 
-```env
-DATABASE_URL="postgresql://postgres:postgres@localhost:5432/postgres"
-JWT_SECRET="your-jwt-secret"
-SENDGRID_API_KEY="your-sendgrid-key"
-SENDGRID_VERIFIED_SENDER_EMAIL="your-verified@email.com"
-FRONTEND_URL="http://localhost:3000"
+| Variable | Required | Notes |
+|---|---|---|
+| `NODE_ENV` | prod | `production` hardens CORS + cookies and disables Swagger |
+| `DATABASE_URL` | always | Postgres connection string |
+| `JWT_SECRET` | always | signing secret; app refuses to boot without it |
+| `JWT_EXP` | optional | access-token TTL (default `15m`) |
+| `JWT_REFRESH_EXP` | optional | refresh-token TTL (default `30d`) |
+| `CORS_ORIGIN` | prod | comma-separated allowed origins |
+| `FRONTEND_URL` | prod | used to build links in emails |
+| `SENDGRID_API_KEY` | optional | console-mock fallback when unset |
+| `SENDGRID_VERIFIED_SENDER_EMAIL` | prod | verified sender address |
+| `RECAPTCHA_SECRET` | prod | demo-session captcha verification |
+| `PORT` | optional | default `3000` |
+
+Startup validation fails fast if a required variable is missing (see
+`src/config/env.validation.ts`).
+
+## Deployment (Fly.io)
+
+The app is deployed to Fly.io (app `nextlift-backend`, region `arn`). Pushing to
+`main` triggers `.github/workflows/fly-deploy.yml`, which **runs lint, typecheck,
+tests and build before deploying**. Config lives in `fly.toml`
+(build via `Dockerfile.prod`; `release_command = npx prisma migrate deploy` runs
+before each release cuts over).
+
+Manual deploy / operations (requires `flyctl`):
+
+```bash
+fly auth login
+
+# Confirm required secrets are set (a missing one now fails boot by design)
+fly secrets list -a nextlift-backend
+#   NODE_ENV=production, JWT_SECRET, DATABASE_URL, RECAPTCHA_SECRET, SENDGRID_API_KEY
+# Set/rotate one:
+fly secrets set NODE_ENV=production -a nextlift-backend
+
+# Deploy (builds Dockerfile.prod, runs prisma migrate deploy, then swaps machines)
+fly deploy
+
+# Watch
+fly logs -a nextlift-backend
+#   verify GET /health -> {"status":"ok"} and that /api is no longer served
+
+# Seed on demand (the old fly seed_command was removed):
+fly ssh console -a nextlift-backend -C "node prisma/seed.js"
+
+# Rollback
+fly releases -a nextlift-backend
+fly deploy -a nextlift-backend --image registry.fly.io/nextlift-backend@sha256:<previous>
 ```
+
+> Migrations are applied by the release command and are not rolled back on a
+> revert — keep migrations backward-compatible.
+
+## Testing & CI
+
+- `pnpm test` runs the Jest unit suite (no DB required).
+- `pnpm test:e2e` boots the app and needs a live database plus `JWT_SECRET`.
+- CI (`fly-deploy.yml`) runs install / prisma generate / lint:check / typecheck /
+  test / build / prisma validate on every push to `main`, and only deploys if
+  they pass.
