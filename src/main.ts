@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { ValidationPipe, VersioningType } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
@@ -12,7 +13,13 @@ import {
 } from './swagger-config';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bufferLogs: true,
+  });
+  // Trust exactly one proxy hop (Fly's edge). This makes request.ip the real
+  // client IP from X-Forwarded-For while ignoring any client-supplied XFF
+  // prefix, so throttling and demo per-IP limits key on the actual caller.
+  app.set('trust proxy', 1);
   app.enableVersioning({
     type: VersioningType.URI,
     defaultVersion: '1',
