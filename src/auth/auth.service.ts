@@ -144,20 +144,20 @@ export class AuthService {
       });
 
       if (!token) {
-        this.logger.warn(`Invalid confirmation token`, { token: tokenString });
+        this.logger.warn(`Invalid confirmation token`);
         throw new UnauthorizedException('Invalid confirmation token');
       }
 
       if (token.expiresAt < new Date()) {
         this.logger.warn(`Confirmation token has expired`, {
-          token: tokenString,
+          userId: token.userId,
         });
         throw new UnauthorizedException('Confirmation token has expired');
       }
 
       if (token.isUsed) {
         this.logger.warn(`Confirmation token has already been used`, {
-          token: tokenString,
+          userId: token.userId,
         });
         throw new ConflictException('Token has already been used');
       }
@@ -192,10 +192,7 @@ export class AuthService {
       if (error instanceof HttpException) {
         throw error;
       }
-      this.logger.error(`Error during email confirmation`, {
-        token: tokenString,
-        error,
-      });
+      this.logger.error(`Error during email confirmation`, { error });
       throw new InternalServerErrorException('Failed to confirm email');
     }
   }
@@ -204,21 +201,26 @@ export class AuthService {
     this.logger.info(`Attempting to resend confirmation email`, {
       email: data.email,
     });
+    // Uniform response so this endpoint cannot be used to tell whether an email
+    // is registered or already confirmed.
+    const genericResponse = {
+      success: true,
+      message:
+        'If your account requires confirmation, a new link has been sent.',
+    };
     try {
       const user = await this.usersService.getUser({ email: data.email });
 
       if (!user) {
-        this.logger.warn(`User not found for resending confirmation email`, {
-          email: data.email,
-        });
-        throw new UnauthorizedException('User not found');
+        this.logger.warn(`Resend confirmation requested for unknown email`);
+        return genericResponse;
       }
 
       if (user.isEmailConfirmed) {
-        this.logger.warn(`Email is already confirmed for user`, {
+        this.logger.warn(`Resend confirmation for already-confirmed user`, {
           userId: user.id,
         });
-        throw new ConflictException('Email is already confirmed');
+        return genericResponse;
       }
 
       // Check if user has requested in the last 30 seconds
@@ -236,16 +238,11 @@ export class AuthService {
         });
 
       if (recentRequest) {
-        const timeLeft = Math.ceil(
-          (30000 - (Date.now() - recentRequest.createdAt.getTime())) / 1000,
-        );
+        // Silently skip within the cooldown without leaking existence/timing.
         this.logger.warn(`User requested confirmation email too soon`, {
           userId: user.id,
-          timeLeft,
         });
-        throw new UnauthorizedException(
-          `Please wait ${timeLeft} seconds before requesting another email confirmation.`,
-        );
+        return genericResponse;
       }
 
       // Invalidate existing unused tokens
@@ -263,10 +260,7 @@ export class AuthService {
       const token = await this.createEmailConfirmationToken(user.id);
       await this.emailService.sendConfirmationEmail(user.email, token.token);
 
-      return {
-        success: true,
-        message: 'Confirmation email sent',
-      };
+      return genericResponse;
     } catch (error: unknown) {
       if (error instanceof HttpException) {
         throw error;
@@ -338,17 +332,23 @@ export class AuthService {
   async login(user: UserResponseDto) {
     this.logger.info(`Logging in user`, { userId: user.id, email: user.email });
     try {
-      const payload = {
+      const payload: JwtPayload = {
         sub: user.id,
         email: user.email,
       };
 
-      const access_token = this.jwtService.sign(payload);
-      const refresh_token = this.jwtService.sign(payload, {
-        expiresIn: this.configService.get('JWT_REFRESH_EXP') || '30d',
+      const access_token = this.jwtService.sign({
+        ...payload,
+        type: 'access',
       });
+      const refresh_token = this.jwtService.sign(
+        { ...payload, type: 'refresh' },
+        {
+          expiresIn: this.configService.get('JWT_REFRESH_EXP') || '30d',
+        },
+      );
 
-      const hashedRefreshToken = await bcrypt.hash(refresh_token, 10);
+      const hashedRefreshToken = await this.hashRefreshToken(refresh_token);
       await this.usersService.updateUser(user.id, {
         refreshToken: hashedRefreshToken,
         lastLoginAt: new Date(),
@@ -377,9 +377,21 @@ export class AuthService {
     this.logger.info(`Attempting to refresh tokens`);
     let payload: JwtPayload;
     try {
-      payload = this.jwtService.decode(refreshToken);
+      // verifyAsync (not decode) enforces the signature and expiry, so an
+      // expired or tampered refresh token is rejected before any DB lookup.
+      payload = await this.jwtService.verifyAsync<JwtPayload>(refreshToken);
     } catch {
-      this.logger.warn(`Invalid refresh token decode attempt`);
+      this.logger.warn(`Invalid or expired refresh token`);
+      throw new UnauthorizedException('Invalid token');
+    }
+
+    // An access token must never be redeemed at the refresh endpoint. Legacy
+    // tokens issued before the type claim have no `type` and stay accepted
+    // through the migration window.
+    if (payload.type === 'access') {
+      this.logger.warn(`Access token presented to refresh endpoint`, {
+        userId: payload.sub,
+      });
       throw new UnauthorizedException('Invalid token');
     }
 
@@ -389,13 +401,16 @@ export class AuthService {
         this.logger.warn(
           `No user or refresh token found during token refresh`,
           {
-            payload,
+            userId: payload.sub,
           },
         );
         throw new UnauthorizedException('No user or token');
       }
 
-      const isValid = await bcrypt.compare(refreshToken, user.refreshToken);
+      const isValid = await this.isRefreshTokenMatch(
+        refreshToken,
+        user.refreshToken,
+      );
       if (!isValid) {
         this.logger.warn(`Invalid refresh token attempt`, { userId: user.id });
         throw new UnauthorizedException('Invalid refresh token');
@@ -408,21 +423,54 @@ export class AuthService {
         throw new UnauthorizedException('Account is disabled');
       }
 
-      const newPayload: JwtPayload = {
+      const access_token = this.jwtService.sign({
         sub: user.id,
         email: user.email,
-      };
+        type: 'access',
+      });
 
-      return {
-        access_token: this.jwtService.sign(newPayload),
-      };
+      return { access_token };
     } catch (error: unknown) {
       if (error instanceof HttpException) {
         throw error;
       }
-      this.logger.error(`Failed to refresh tokens`, { payload, error });
+      this.logger.error(`Failed to refresh tokens`, {
+        userId: payload.sub,
+        error,
+      });
       throw new InternalServerErrorException('Failed to refresh tokens');
     }
+  }
+
+  /**
+   * Null the stored refresh token so the current session can no longer be
+   * refreshed server-side (used by logout).
+   */
+  async logout(userId: number) {
+    await this.usersService.updateUser(userId, { refreshToken: null });
+  }
+
+  /**
+   * bcrypt only hashes the first 72 bytes of its input. Every JWT issued to a
+   * given user shares an identical 72-byte prefix (header + `sub`/`email`),
+   * so hashing the raw token would make all of a user's refresh tokens
+   * interchangeable. Hash a SHA-256 digest instead to bind the hash to the
+   * whole token.
+   */
+  private hashRefreshToken(token: string) {
+    const digest = crypto.createHash('sha256').update(token).digest('hex');
+    return bcrypt.hash(digest, 10);
+  }
+
+  private async isRefreshTokenMatch(token: string, storedHash: string) {
+    const digest = crypto.createHash('sha256').update(token).digest('hex');
+    if (await bcrypt.compare(digest, storedHash)) {
+      return true;
+    }
+    // Legacy fallback: tokens issued before SHA-256 pre-hashing were stored as
+    // bcrypt(rawToken). Safe to drop once all such tokens have expired.
+    // TODO(2026-09-30): remove the legacy raw-token comparison.
+    return bcrypt.compare(token, storedHash);
   }
 
   async requestPasswordReset(
@@ -433,14 +481,18 @@ export class AuthService {
     this.logger.info(`Password reset requested for email`, {
       email: data.email,
     });
+    // Always return the same response so an attacker cannot tell whether an
+    // email is registered (or was recently used) from this endpoint.
+    const genericResponse = {
+      success: true,
+      message: 'A password reset link has been sent',
+    };
     try {
       const user = await this.usersService.getUser({ email: data.email });
 
       if (!user) {
-        this.logger.warn(`User not found for password reset`, {
-          email: data.email,
-        });
-        throw new UnauthorizedException('User not found');
+        this.logger.warn(`Password reset requested for unknown email`);
+        return genericResponse;
       }
 
       // Check if user has requested a reset in the last 30 seconds
@@ -458,16 +510,12 @@ export class AuthService {
         });
 
       if (recentRequest) {
-        const timeLeft = Math.ceil(
-          (30000 - (Date.now() - recentRequest.createdAt.getTime())) / 1000,
-        );
+        // Silently skip sending a second email within the cooldown, without
+        // revealing the account exists or how long is left.
         this.logger.warn(`User requested password reset too soon`, {
           userId: user.id,
-          timeLeft,
         });
-        throw new UnauthorizedException(
-          `Please wait ${timeLeft} seconds before requesting another password reset.`,
-        );
+        return genericResponse;
       }
 
       // Invalidate existing unused tokens
@@ -490,10 +538,7 @@ export class AuthService {
 
       await this.emailService.sendPasswordResetEmail(user.email, token.token);
 
-      return {
-        success: true,
-        message: 'A password reset link has been sent',
-      };
+      return genericResponse;
     } catch (error: unknown) {
       if (error instanceof HttpException) {
         throw error;
@@ -549,10 +594,7 @@ export class AuthService {
       if (error instanceof HttpException) {
         throw error;
       }
-      this.logger.error(`Error during password reset`, {
-        token: tokenString,
-        error,
-      });
+      this.logger.error(`Error during password reset`, { error });
       throw new InternalServerErrorException('Failed to reset password');
     }
   }
@@ -572,7 +614,12 @@ export class AuthService {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: `secret=${secretKey}&response=${token}`,
+          // URLSearchParams encodes the values, so a token containing `&`/`=`
+          // can't inject extra parameters into the siteverify request.
+          body: new URLSearchParams({
+            secret: secretKey,
+            response: token,
+          }).toString(),
         },
       );
 

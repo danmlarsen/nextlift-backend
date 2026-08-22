@@ -1,0 +1,11 @@
+# pnpm 11 requires explicit approval of dependency build scripts.
+# Without this file `pnpm install` exits 1 (ERR_PNPM_IGNORED_BUILDS),
+# which would break the Docker/CI build.
+allowBuilds:
+  '@nestjs/core': false
+  '@prisma/client': true
+  '@prisma/engines': true
+  '@scarf/scarf': false
+  bcrypt: true
+  prisma: true
+  unrs-resolver: true

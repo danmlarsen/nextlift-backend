@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
@@ -9,17 +9,18 @@ import { JwtPayload } from 'src/common/types/jwt-payload.interface';
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(private readonly configService: ConfigService) {
     super({
-      jwtFromRequest: ExtractJwt.fromExtractors([
-        (req: { cookies?: { access_token?: string } }) =>
-          req?.cookies?.access_token ?? null,
-        ExtractJwt.fromAuthHeaderAsBearerToken(),
-      ]),
+      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
       secretOrKey: configService.getOrThrow('JWT_SECRET'),
     });
   }
 
-  validate(payload: JwtPayload) {
-    return { id: payload.sub, email: payload.email } as AuthUser;
+  validate(payload: JwtPayload): AuthUser {
+    // Only access tokens may authorize requests; a refresh token (or any
+    // legacy token issued before the type claim) must not pass the guard.
+    if (payload.type !== 'access') {
+      throw new UnauthorizedException('Invalid token type');
+    }
+    return { id: payload.sub, email: payload.email };
   }
 }

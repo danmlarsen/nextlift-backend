@@ -4,6 +4,7 @@ import { WorkoutsModule } from './workouts/workouts.module';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { ConfigModule } from '@nestjs/config';
+import { validateEnv } from './config/env.validation';
 import { ExercisesModule } from './exercises/exercises.module';
 import { LoggerModule } from 'nestjs-pino';
 import { EmailModule } from './email/email.module';
@@ -15,7 +16,7 @@ import { BodyMeasurementsModule } from './body-measurements/body-measurements.mo
 
 @Module({
   imports: [
-    ConfigModule.forRoot(),
+    ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
     LoggerModule.forRoot({
       pinoHttp: {
         level: process.env.NODE_ENV !== 'production' ? 'debug' : 'info',
@@ -23,7 +24,15 @@ import { BodyMeasurementsModule } from './body-measurements/body-measurements.mo
           process.env.NODE_ENV !== 'production'
             ? { target: 'pino-pretty', options: { colorize: true } }
             : undefined,
-        redact: ['req.headers.authorization', 'req.body.password'],
+        redact: [
+          'req.headers.authorization',
+          'req.headers.cookie',
+          'req.body.password',
+          'req.body.currentPassword',
+          'req.body.newPassword',
+          'req.body.captchaToken',
+          'req.body.refresh_token',
+        ],
         autoLogging: {
           ignore: (req) => req.url === '/health', // Don't log health checks
         },

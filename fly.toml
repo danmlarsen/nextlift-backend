@@ -11,9 +11,9 @@ primary_region = 'arn'
 
 [deploy]
   release_command = 'npx prisma migrate deploy'
-  seed_command = 'ts-node prisma/seed.ts'
 
 [env]
+  NODE_ENV = 'production'
   CORS_ORIGIN = 'https://nextlift.app,https://www.nextlift.app'
   FRONTEND_URL = 'https://www.nextlift.app'
   SENDGRID_VERIFIED_SENDER_EMAIL = 'no-reply@nextlift.app'

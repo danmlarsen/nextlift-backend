@@ -5,11 +5,39 @@ on:
   push:
     branches:
       - main
+  pull_request:
 jobs:
+  verify:
+    name: Verify (lint, typecheck, test, build)
+    runs-on: ubuntu-latest
+    env:
+      # prisma validate resolves env("DATABASE_URL") but never connects, so a
+      # placeholder is enough; unit tests mock their own dependencies.
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+    steps:
+      - uses: actions/checkout@v4
+      # No version input: reads the pinned pnpm from package.json "packageManager".
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prisma generate
+      - run: pnpm lint:check
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm exec prisma validate
+
   deploy:
     name: Deploy app
+    needs: verify
+    # Verify runs on every PR to give a pre-merge check, but only an actual
+    # push to main may deploy — never a pull_request event.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    concurrency: deploy-group    # optional: ensure only one action runs at a time
+    concurrency: deploy-group # ensure only one deploy runs at a time
     steps:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
