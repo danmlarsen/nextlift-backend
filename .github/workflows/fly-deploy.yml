@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+  pull_request:
 jobs:
   verify:
     name: Verify (lint, typecheck, test, build)
@@ -32,6 +33,9 @@ jobs:
   deploy:
     name: Deploy app
     needs: verify
+    # Verify runs on every PR to give a pre-merge check, but only an actual
+    # push to main may deploy — never a pull_request event.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     concurrency: deploy-group # ensure only one deploy runs at a time
     steps:
