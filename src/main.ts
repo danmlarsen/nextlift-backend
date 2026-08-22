@@ -25,7 +25,15 @@ async function bootstrap() {
     defaultVersion: '1',
   });
   app.useLogger(app.get(Logger));
-  app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
+  app.useGlobalPipes(
+    new ValidationPipe({
+      transform: true,
+      whitelist: true,
+      // Reject unknown properties with 400 instead of silently stripping them.
+      // Verified safe: every frontend payload sends only declared DTO fields.
+      forbidNonWhitelisted: true,
+    }),
+  );
   app.use(helmet());
   app.use(cookieParser());
   app.enableCors({

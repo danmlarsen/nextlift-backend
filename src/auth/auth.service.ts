@@ -201,21 +201,26 @@ export class AuthService {
     this.logger.info(`Attempting to resend confirmation email`, {
       email: data.email,
     });
+    // Uniform response so this endpoint cannot be used to tell whether an email
+    // is registered or already confirmed.
+    const genericResponse = {
+      success: true,
+      message:
+        'If your account requires confirmation, a new link has been sent.',
+    };
     try {
       const user = await this.usersService.getUser({ email: data.email });
 
       if (!user) {
-        this.logger.warn(`User not found for resending confirmation email`, {
-          email: data.email,
-        });
-        throw new UnauthorizedException('User not found');
+        this.logger.warn(`Resend confirmation requested for unknown email`);
+        return genericResponse;
       }
 
       if (user.isEmailConfirmed) {
-        this.logger.warn(`Email is already confirmed for user`, {
+        this.logger.warn(`Resend confirmation for already-confirmed user`, {
           userId: user.id,
         });
-        throw new ConflictException('Email is already confirmed');
+        return genericResponse;
       }
 
       // Check if user has requested in the last 30 seconds
@@ -233,16 +238,11 @@ export class AuthService {
         });
 
       if (recentRequest) {
-        const timeLeft = Math.ceil(
-          (30000 - (Date.now() - recentRequest.createdAt.getTime())) / 1000,
-        );
+        // Silently skip within the cooldown without leaking existence/timing.
         this.logger.warn(`User requested confirmation email too soon`, {
           userId: user.id,
-          timeLeft,
         });
-        throw new UnauthorizedException(
-          `Please wait ${timeLeft} seconds before requesting another email confirmation.`,
-        );
+        return genericResponse;
       }
 
       // Invalidate existing unused tokens
@@ -260,10 +260,7 @@ export class AuthService {
       const token = await this.createEmailConfirmationToken(user.id);
       await this.emailService.sendConfirmationEmail(user.email, token.token);
 
-      return {
-        success: true,
-        message: 'Confirmation email sent',
-      };
+      return genericResponse;
     } catch (error: unknown) {
       if (error instanceof HttpException) {
         throw error;
@@ -484,14 +481,18 @@ export class AuthService {
     this.logger.info(`Password reset requested for email`, {
       email: data.email,
     });
+    // Always return the same response so an attacker cannot tell whether an
+    // email is registered (or was recently used) from this endpoint.
+    const genericResponse = {
+      success: true,
+      message: 'A password reset link has been sent',
+    };
     try {
       const user = await this.usersService.getUser({ email: data.email });
 
       if (!user) {
-        this.logger.warn(`User not found for password reset`, {
-          email: data.email,
-        });
-        throw new UnauthorizedException('User not found');
+        this.logger.warn(`Password reset requested for unknown email`);
+        return genericResponse;
       }
 
       // Check if user has requested a reset in the last 30 seconds
@@ -509,16 +510,12 @@ export class AuthService {
         });
 
       if (recentRequest) {
-        const timeLeft = Math.ceil(
-          (30000 - (Date.now() - recentRequest.createdAt.getTime())) / 1000,
-        );
+        // Silently skip sending a second email within the cooldown, without
+        // revealing the account exists or how long is left.
         this.logger.warn(`User requested password reset too soon`, {
           userId: user.id,
-          timeLeft,
         });
-        throw new UnauthorizedException(
-          `Please wait ${timeLeft} seconds before requesting another password reset.`,
-        );
+        return genericResponse;
       }
 
       // Invalidate existing unused tokens
@@ -541,10 +538,7 @@ export class AuthService {
 
       await this.emailService.sendPasswordResetEmail(user.email, token.token);
 
-      return {
-        success: true,
-        message: 'A password reset link has been sent',
-      };
+      return genericResponse;
     } catch (error: unknown) {
       if (error instanceof HttpException) {
         throw error;
@@ -620,7 +614,12 @@ export class AuthService {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: `secret=${secretKey}&response=${token}`,
+          // URLSearchParams encodes the values, so a token containing `&`/`=`
+          // can't inject extra parameters into the siteverify request.
+          body: new URLSearchParams({
+            secret: secretKey,
+            response: token,
+          }).toString(),
         },
       );
 
