@@ -9,6 +9,10 @@ jobs:
   verify:
     name: Verify (lint, typecheck, test, build)
     runs-on: ubuntu-latest
+    env:
+      # prisma validate resolves env("DATABASE_URL") but never connects, so a
+      # placeholder is enough; unit tests mock their own dependencies.
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
     steps:
       - uses: actions/checkout@v4
       # No version input: reads the pinned pnpm from package.json "packageManager".
