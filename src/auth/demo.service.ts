@@ -65,7 +65,7 @@ export class DemoService {
 
     const demoUser = await this.prismaService.user.create({
       data: {
-        email: `demo-${timestamp}-${randomSuffix}@nextlift.app`,
+        email: `demo-${timestamp}-${randomSuffix}@nextlift.invalid`,
         password: 'demo-password-not-used',
         isEmailConfirmed: true,
         isActive: true,

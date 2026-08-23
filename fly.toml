@@ -14,7 +14,7 @@ primary_region = 'arn'
 
 [env]
   NODE_ENV = 'production'
-  CORS_ORIGIN = 'https://nextlift.app,https://www.nextlift.app'
+  CORS_ORIGIN = 'https://nextlift.app,https://www.nextlift.app,https://nextlift.danmarius.no'
   FRONTEND_URL = 'https://www.nextlift.app'
   SENDGRID_VERIFIED_SENDER_EMAIL = 'no-reply@nextlift.app'
 
