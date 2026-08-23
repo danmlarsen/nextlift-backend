@@ -9,11 +9,13 @@ import { CreateWorkoutExerciseDto } from './dtos/create-workout-exercise.dto';
 import { UpdateWorkoutExerciseDto } from './dtos/update-workout-exercise.dto';
 import { FULL_WORKOUT_INCLUDE } from './const/full-workout-include';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
+import { PersonalRecordsService } from 'src/personal-records/personal-records.service';
 
 @Injectable()
 export class WorkoutExerciseService {
   constructor(
     private readonly prismaService: PrismaService,
+    private readonly personalRecordsService: PersonalRecordsService,
     @InjectPinoLogger(WorkoutExerciseService.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -168,7 +170,23 @@ export class WorkoutExerciseService {
         throw new ForbiddenException('Not allowed');
       }
 
-      return await this.prismaService.workout.update({
+      // Records anchored to this exercise's sets cascade away with the
+      // delete; re-derive them afterwards. On lookup failure assume some do.
+      let hadRecords = true;
+      try {
+        hadRecords =
+          (await this.prismaService.personalRecord.count({
+            where: { userId, workoutSet: { workoutExerciseId: id } },
+          })) > 0;
+      } catch (error: unknown) {
+        this.logger.error(`Personal record lookup failed`, {
+          userId,
+          id,
+          error,
+        });
+      }
+
+      const updatedWorkout = await this.prismaService.workout.update({
         where: { id: workoutExercise.workoutId },
         data: {
           workoutExercises: {
@@ -177,6 +195,22 @@ export class WorkoutExerciseService {
         },
         include: FULL_WORKOUT_INCLUDE,
       });
+
+      if (hadRecords) {
+        try {
+          await this.personalRecordsService.recomputeForExercises(userId, [
+            workoutExercise.exerciseId,
+          ]);
+        } catch (error: unknown) {
+          this.logger.error(`Personal record recompute failed`, {
+            userId,
+            id,
+            error,
+          });
+        }
+      }
+
+      return updatedWorkout;
     } catch (error: unknown) {
       if (error instanceof HttpException) {
         throw error;
