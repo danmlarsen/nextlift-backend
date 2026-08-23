@@ -12,12 +12,12 @@ async function main() {
       create: {
         id: -1,
         userType: UserType.SYSTEM,
-        email: 'system@nextlift.app',
+        email: 'system@nextlift.invalid',
         password: 'invalidhashjustforseeding',
         isEmailConfirmed: true,
         isActive: false,
       },
-      update: {},
+      update: { email: 'system@nextlift.invalid' },
     });
     console.log('✅ System user created/verified');
 
