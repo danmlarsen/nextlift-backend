@@ -102,6 +102,8 @@ model Workout {
   user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId             Int
   workoutExercises   WorkoutExercise[]
+
+  @@index([userId, status, startedAt])
 }
 
 model WorkoutExercise {
@@ -118,6 +120,9 @@ model WorkoutExercise {
   previousWorkoutExercise   WorkoutExercise?  @relation("PreviousWorkoutExercise", fields: [previousWorkoutExerciseId], references: [id])
   previousWorkoutExerciseId Int?
   nextWorkoutExercise       WorkoutExercise[] @relation("PreviousWorkoutExercise")
+
+  @@index([workoutId])
+  @@index([exerciseId])
 }
 
 model WorkoutSet {
@@ -134,6 +139,8 @@ model WorkoutSet {
   weight            Float?
   duration          Int?
   personalRecords   PersonalRecord[]
+
+  @@index([workoutExerciseId])
 }
 
 model PersonalRecord {
@@ -142,12 +149,15 @@ model PersonalRecord {
   userId       Int
   exercise     Exercise   @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
   exerciseId   Int
-  recordType   String
+  recordType   RecordType
+  value        Float
+  achievedAt   DateTime
   createdAt    DateTime   @default(now())
   workoutSet   WorkoutSet @relation(fields: [workoutSetId], references: [id], onDelete: Cascade)
   workoutSetId Int
 
   @@unique([userId, exerciseId, recordType])
+  @@index([workoutSetId])
 }
 
 model DemoIpTracking {
@@ -183,4 +193,10 @@ enum WorkoutStatus {
   ACTIVE
   DRAFT
   COMPLETED
+}
+
+enum RecordType {
+  MAX_WEIGHT
+  ONE_REP_MAX
+  MAX_SET_VOLUME
 }

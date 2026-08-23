@@ -3,6 +3,7 @@ import { DemoService } from './demo.service';
 import { AuthService } from './auth.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
+import { PersonalRecordsService } from 'src/personal-records/personal-records.service';
 
 describe('DemoService', () => {
   let service: DemoService;
@@ -14,6 +15,7 @@ describe('DemoService', () => {
         { provide: PrismaService, useValue: {} },
         { provide: AuthService, useValue: {} },
         { provide: ConfigService, useValue: {} },
+        { provide: PersonalRecordsService, useValue: {} },
         {
           provide: 'PinoLogger:DemoService',
           useValue: {
