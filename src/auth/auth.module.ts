@@ -10,6 +10,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { EmailModule } from 'src/email/email.module';
 import { PrismaModule } from 'src/prisma/prisma.module';
 import { DemoService } from './demo.service';
+import { PersonalRecordsModule } from 'src/personal-records/personal-records.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { DemoService } from './demo.service';
       }),
     }),
     EmailModule,
+    PersonalRecordsModule,
   ],
   providers: [AuthService, LocalStrategy, JwtStrategy, DemoService],
   controllers: [AuthController],

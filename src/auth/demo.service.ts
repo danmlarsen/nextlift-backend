@@ -5,12 +5,14 @@ import crypto from 'crypto';
 import { Exercise, Prisma, UserType } from '@prisma/client';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { PersonalRecordsService } from 'src/personal-records/personal-records.service';
 
 @Injectable()
 export class DemoService {
   constructor(
     private readonly prismaService: PrismaService,
     private readonly authService: AuthService,
+    private readonly personalRecordsService: PersonalRecordsService,
     @InjectPinoLogger(DemoService.name) private readonly logger: PinoLogger,
   ) {}
 
@@ -97,6 +99,17 @@ export class DemoService {
     for (let i = 0; i < workoutDates.length; i++) {
       const workoutDate = workoutDates[i];
       await this.createDemoWorkout(userId, exercises, workoutDate, i);
+    }
+
+    // The seeded workouts bypass the write hooks, so derive the records here;
+    // otherwise the demo user's first real set falsely celebrates.
+    try {
+      await this.personalRecordsService.recomputeAllForUser(userId);
+    } catch (error: unknown) {
+      this.logger.error(`Failed to compute personal records for demo user`, {
+        userId,
+        error,
+      });
     }
   }
 

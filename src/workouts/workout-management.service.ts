@@ -13,14 +13,58 @@ import { CreateWorkoutDto } from './dtos/create-workout.dto';
 import { FULL_WORKOUT_INCLUDE } from './const/full-workout-include';
 import { PinoLogger } from 'nestjs-pino/PinoLogger';
 import { InjectPinoLogger } from 'nestjs-pino';
+import { PersonalRecordsService } from 'src/personal-records/personal-records.service';
 
 @Injectable()
 export class WorkoutManagementService {
   constructor(
     private readonly prismaService: PrismaService,
+    private readonly personalRecordsService: PersonalRecordsService,
     @InjectPinoLogger(WorkoutManagementService.name)
     private readonly logger: PinoLogger,
   ) {}
+
+  /**
+   * Exercises with a record anchored in this workout. Captured before a
+   * destructive change so the records can be re-derived afterwards; returns
+   * an empty list on failure (a stale record self-heals on the next write).
+   */
+  private async getRecordExerciseIds(
+    userId: number,
+    workoutId: number,
+  ): Promise<number[]> {
+    try {
+      const records = await this.prismaService.personalRecord.findMany({
+        where: { userId, workoutSet: { workoutExercise: { workoutId } } },
+        select: { exerciseId: true },
+        distinct: ['exerciseId'],
+      });
+      return records.map((record) => record.exerciseId);
+    } catch (error: unknown) {
+      this.logger.error(`Personal record lookup failed`, {
+        userId,
+        workoutId,
+        error,
+      });
+      return [];
+    }
+  }
+
+  private async recomputeRecords(userId: number, exerciseIds: number[]) {
+    if (exerciseIds.length === 0) return;
+    try {
+      await this.personalRecordsService.recomputeForExercises(
+        userId,
+        exerciseIds,
+      );
+    } catch (error: unknown) {
+      this.logger.error(`Personal record recompute failed`, {
+        userId,
+        exerciseIds,
+        error,
+      });
+    }
+  }
 
   async getWorkout(
     userId: number,
@@ -98,11 +142,21 @@ export class WorkoutManagementService {
         throw new ForbiddenException('Not allowed');
       }
 
-      return await this.prismaService.workout.update({
+      // Re-dating a workout changes the achievedAt of records anchored in it.
+      const affectedExerciseIds =
+        data.startedAt !== undefined
+          ? await this.getRecordExerciseIds(userId, id)
+          : [];
+
+      const updatedWorkout = await this.prismaService.workout.update({
         where: { id, userId },
         data,
         include: FULL_WORKOUT_INCLUDE,
       });
+
+      await this.recomputeRecords(userId, affectedExerciseIds);
+
+      return updatedWorkout;
     } catch (error: unknown) {
       if (error instanceof HttpException) {
         throw error;
@@ -120,10 +174,17 @@ export class WorkoutManagementService {
   async deleteWorkout(id: number, userId: number) {
     this.logger.info(`Deleting workout`, { userId, id });
     try {
-      return await this.prismaService.workout.delete({
+      // Captured before the delete: the cascade removes the anchored rows.
+      const affectedExerciseIds = await this.getRecordExerciseIds(userId, id);
+
+      const deletedWorkout = await this.prismaService.workout.delete({
         where: { id, userId },
         include: FULL_WORKOUT_INCLUDE,
       });
+
+      await this.recomputeRecords(userId, affectedExerciseIds);
+
+      return deletedWorkout;
     } catch (error: unknown) {
       if (error instanceof HttpException) {
         throw error;
@@ -254,10 +315,20 @@ export class WorkoutManagementService {
         throw new ForbiddenException('Not allowed');
       }
 
-      return await this.prismaService.workout.delete({
+      // Captured before the delete: the cascade removes the anchored rows.
+      const affectedExerciseIds = await this.getRecordExerciseIds(
+        userId,
+        workout.id,
+      );
+
+      const deletedWorkout = await this.prismaService.workout.delete({
         where: { id: workout.id },
         include: FULL_WORKOUT_INCLUDE,
       });
+
+      await this.recomputeRecords(userId, affectedExerciseIds);
+
+      return deletedWorkout;
     } catch (error: unknown) {
       if (error instanceof HttpException) {
         throw error;
