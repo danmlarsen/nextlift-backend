@@ -33,8 +33,8 @@ primary_region = 'arn'
   memory_mb = 256
 
 [[http_service.checks]]
-  grace_period = "20s"
-  interval = "15s"
-  timeout = "5s"
+  grace_period = "3s"
+  interval = "5s"
+  timeout = "2s"
   method = "GET"
   path = "/health"
