@@ -6,6 +6,7 @@ import {
   VERSION_NEUTRAL,
 } from '@nestjs/common';
 import { ApiBearerAuth } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { PrismaService } from 'src/prisma/prisma.service';
 
@@ -16,6 +17,7 @@ export class HealthController {
   /**
    * Check basic health status of the API
    */
+  @SkipThrottle()
   @Get()
   check() {
     return {

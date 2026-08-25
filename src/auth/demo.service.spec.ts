@@ -7,12 +7,24 @@ import { PersonalRecordsService } from 'src/personal-records/personal-records.se
 
 describe('DemoService', () => {
   let service: DemoService;
+  const userFindMany = jest.fn();
+  const transaction = jest.fn();
+  const loggerError = jest.fn();
 
   beforeEach(async () => {
+    jest.clearAllMocks();
+    userFindMany.mockResolvedValue([]);
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         DemoService,
-        { provide: PrismaService, useValue: {} },
+        {
+          provide: PrismaService,
+          useValue: {
+            user: { findMany: userFindMany },
+            $transaction: transaction,
+          },
+        },
         { provide: AuthService, useValue: {} },
         { provide: ConfigService, useValue: {} },
         { provide: PersonalRecordsService, useValue: {} },
@@ -21,7 +33,7 @@ describe('DemoService', () => {
           useValue: {
             info: jest.fn(),
             warn: jest.fn(),
-            error: jest.fn(),
+            error: loggerError,
             fatal: jest.fn(),
             debug: jest.fn(),
             trace: jest.fn(),
@@ -35,5 +47,17 @@ describe('DemoService', () => {
 
   it('should be defined', () => {
     expect(service).toBeDefined();
+  });
+
+  it('does not let a cleanup failure block callers', async () => {
+    const cleanupError = new Error('database unavailable');
+    userFindMany.mockRejectedValue(cleanupError);
+
+    await expect(service.cleanupExpiredDemoUsers()).resolves.toBeUndefined();
+
+    expect(loggerError).toHaveBeenCalledWith(
+      'Failed to clean up expired demo users',
+      { error: cleanupError },
+    );
   });
 });

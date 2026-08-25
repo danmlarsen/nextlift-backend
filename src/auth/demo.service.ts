@@ -22,6 +22,10 @@ export class DemoService {
 
     await this.checkIpRateLimit(ipAddress);
 
+    // A suspended Fly machine cannot run the scheduled 03:00 cleanup. Running
+    // it when demo traffic wakes the app keeps expiry reliable on the free tier.
+    await this.cleanupExpiredDemoUsers();
+
     const demoUser = await this.createDemoUser();
 
     this.logger.info(`Demo user created`, { userId: demoUser.id, ipAddress });
@@ -31,34 +35,39 @@ export class DemoService {
   // Cleanup job to remove expired demo users
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
   async cleanupExpiredDemoUsers() {
-    this.logger.info('Starting cleanup of expired demo users');
-    const whereClause = {
-      userType: UserType.DEMO,
-      demoExpiresAt: { lt: new Date() },
-    };
+    try {
+      this.logger.info('Starting cleanup of expired demo users');
+      const whereClause = {
+        userType: UserType.DEMO,
+        demoExpiresAt: { lt: new Date() },
+      };
 
-    const usersToDelete = await this.prismaService.user.findMany({
-      where: whereClause,
-    });
-
-    if (usersToDelete.length > 0) {
-      await this.prismaService.$transaction(async (tx) => {
-        await tx.deletedUser.createMany({
-          data: usersToDelete.map((users) => ({
-            originalUserId: users.id,
-            email: users.email,
-            createdAt: users.createdAt,
-          })),
-        });
-
-        return tx.user.deleteMany({
-          where: whereClause,
-        });
+      const usersToDelete = await this.prismaService.user.findMany({
+        where: whereClause,
       });
+
+      if (usersToDelete.length > 0) {
+        await this.prismaService.$transaction(async (tx) => {
+          await tx.deletedUser.createMany({
+            data: usersToDelete.map((users) => ({
+              originalUserId: users.id,
+              email: users.email,
+              createdAt: users.createdAt,
+            })),
+          });
+
+          return tx.user.deleteMany({
+            where: whereClause,
+          });
+        });
+      }
+      this.logger.info('Completed cleanup of expired demo users', {
+        deletedCount: usersToDelete.length,
+      });
+    } catch (error: unknown) {
+      // Cleanup must never prevent a user from starting a demo session.
+      this.logger.error('Failed to clean up expired demo users', { error });
     }
-    this.logger.info('Completed cleanup of expired demo users', {
-      deletedCount: usersToDelete.length,
-    });
   }
 
   private async createDemoUser() {

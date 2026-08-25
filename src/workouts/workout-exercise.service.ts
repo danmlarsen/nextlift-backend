@@ -10,6 +10,7 @@ import { UpdateWorkoutExerciseDto } from './dtos/update-workout-exercise.dto';
 import { FULL_WORKOUT_INCLUDE } from './const/full-workout-include';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { PersonalRecordsService } from 'src/personal-records/personal-records.service';
+import { SYSTEM_USER_ID } from 'src/common/constants';
 
 @Injectable()
 export class WorkoutExerciseService {
@@ -27,14 +28,23 @@ export class WorkoutExerciseService {
   ) {
     this.logger.info(`Creating workout exercise`, { userId, workoutId, data });
     try {
-      const workout = await this.prismaService.workout.findFirst({
-        where: { id: workoutId, userId },
-      });
+      const [workout, exercise] = await Promise.all([
+        this.prismaService.workout.findFirst({
+          where: { id: workoutId, userId },
+        }),
+        this.prismaService.exercise.findFirst({
+          where: {
+            id: data.exerciseId,
+            OR: [{ userId }, { userId: SYSTEM_USER_ID }],
+          },
+          select: { id: true },
+        }),
+      ]);
 
-      if (!workout) {
+      if (!workout || !exercise) {
         this.logger.warn(
-          `User tried to create workout exercise for a workout that does not exist or they do not own`,
-          { userId, workoutId },
+          `User tried to add an unavailable exercise or modify a workout they do not own`,
+          { userId, workoutId, exerciseId: data.exerciseId },
         );
         throw new ForbiddenException('Not allowed');
       }

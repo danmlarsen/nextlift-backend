@@ -42,6 +42,8 @@ async function bootstrap() {
         ? process.env.CORS_ORIGIN?.split(',')
         : true,
     credentials: true,
+    // Avoid repeating the preflight request for every API call.
+    maxAge: 600,
   });
 
   const swaggerConfig = createSwaggerConfig();
