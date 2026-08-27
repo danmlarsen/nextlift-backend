@@ -8,6 +8,7 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -44,6 +45,30 @@ export class ExercisesController {
       cursor,
       filters: { name, targetMuscleGroups, equipment },
     });
+  }
+
+  /** Get the current user's favorite exercise IDs. */
+  @Get('favorites')
+  getFavoriteExercises(@CurrentUser() user: AuthUser) {
+    return this.exercisesService.getFavoriteExerciseIds(user.id);
+  }
+
+  /** Add an available exercise to the current user's favorites. */
+  @Put(':exerciseId/favorite')
+  favoriteExercise(
+    @CurrentUser() user: AuthUser,
+    @Param('exerciseId', ParseIntPipe) exerciseId: number,
+  ) {
+    return this.exercisesService.favoriteExercise(user.id, exerciseId);
+  }
+
+  /** Remove an exercise from the current user's favorites. */
+  @Delete(':exerciseId/favorite')
+  unfavoriteExercise(
+    @CurrentUser() user: AuthUser,
+    @Param('exerciseId', ParseIntPipe) exerciseId: number,
+  ) {
+    return this.exercisesService.unfavoriteExercise(user.id, exerciseId);
   }
 
   /**

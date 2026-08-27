@@ -10,6 +10,22 @@ import { CreateExerciseDto } from './dtos/create-exercise.dto';
 import { UpdateExerciseDto } from './dtos/update-exercise.dto';
 import { SYSTEM_USER_ID } from 'src/common/constants';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
+import { Prisma } from '@prisma/client';
+
+type RankedExercise = {
+  id: number;
+  name: string;
+  userId: number | null;
+  category: string;
+  targetMuscleGroups: string[];
+  secondaryMuscleGroups: string[];
+  equipment: string;
+  instructions: string | null;
+  imageUrls: string[];
+  videoUrls: string[];
+  isFavorite: boolean;
+  timesUsed: number;
+};
 
 @Injectable()
 export class ExercisesService {
@@ -67,74 +83,68 @@ export class ExercisesService {
     },
   ) {
     const EXERCISE_LIMIT = 20;
+    const offset = Math.max(options?.cursor ?? 0, 0);
 
     this.logger.info(`Fetching exercises`, { userId, options });
     try {
-      const exercises = await this.prismaService.exercise.findMany({
-        where: {
-          AND: [
-            { OR: [{ userId }, { userId: SYSTEM_USER_ID }] },
-            // Name filter - case insensitive partial match
-            ...(options?.filters?.name
-              ? [
-                  {
-                    name: {
-                      contains: options.filters.name,
-                      mode: 'insensitive' as const,
-                    },
-                  },
-                ]
-              : []),
-            // Muscle groups filter - array contains any of the specified groups
-            ...(options?.filters?.targetMuscleGroups?.length
-              ? [
-                  {
-                    targetMuscleGroups: {
-                      hasSome: options.filters.targetMuscleGroups,
-                    },
-                  },
-                ]
-              : []),
-            // Equipment filter - matches any of the specified equipment
-            ...(options?.filters?.equipment?.length
-              ? [
-                  {
-                    equipment: {
-                      in: options.filters.equipment,
-                    },
-                  },
-                ]
-              : []),
-          ],
-        },
-        take: EXERCISE_LIMIT + 1,
-        ...(options?.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
-        orderBy: { name: 'asc' },
-        include: {
-          _count: {
-            select: {
-              workoutExercises: {
-                where: {
-                  workout: {
-                    userId: userId,
-                  },
-                },
-              },
-            },
-          },
-        },
-      });
+      const filters: Prisma.Sql[] = [
+        Prisma.sql`(e."userId" = ${userId} OR e."userId" = ${SYSTEM_USER_ID})`,
+      ];
 
-      const exercisesWithTimesUsed = exercises.map(
-        ({ _count, ...exercise }) => ({
-          ...exercise,
-          timesUsed: _count.workoutExercises,
-        }),
+      if (options?.filters?.name) {
+        filters.push(Prisma.sql`e."name" ILIKE ${`%${options.filters.name}%`}`);
+      }
+      if (options?.filters?.targetMuscleGroups?.length) {
+        filters.push(
+          Prisma.sql`e."targetMuscleGroups" && ARRAY[${Prisma.join(options.filters.targetMuscleGroups)}]::text[]`,
+        );
+      }
+      if (options?.filters?.equipment?.length) {
+        filters.push(
+          Prisma.sql`e."equipment" IN (${Prisma.join(options.filters.equipment)})`,
+        );
+      }
+
+      // The per-user favorite and usage aggregates must be calculated before
+      // pagination so every page follows the same global ranking.
+      const exercises = await this.prismaService.$queryRaw<RankedExercise[]>(
+        Prisma.sql`
+          SELECT
+            e."id",
+            e."name",
+            e."userId",
+            e."category",
+            e."targetMuscleGroups",
+            e."secondaryMuscleGroups",
+            e."equipment",
+            e."instructions",
+            e."imageUrls",
+            e."videoUrls",
+            EXISTS (
+              SELECT 1
+              FROM "ExerciseFavorite" ef
+              WHERE ef."userId" = ${userId}
+                AND ef."exerciseId" = e."id"
+            ) AS "isFavorite",
+            (
+              SELECT COUNT(DISTINCT w."id")::integer
+              FROM "WorkoutExercise" we
+              INNER JOIN "Workout" w ON w."id" = we."workoutId"
+              WHERE we."exerciseId" = e."id"
+                AND w."userId" = ${userId}
+                AND w."status" = 'COMPLETED'
+            ) AS "timesUsed"
+          FROM "Exercise" e
+          WHERE ${Prisma.join(filters, ' AND ')}
+          ORDER BY "isFavorite" DESC, "timesUsed" DESC, LOWER(e."name") ASC, e."id" ASC
+          LIMIT ${EXERCISE_LIMIT + 1}
+          OFFSET ${offset}
+        `,
       );
 
-      const hasNextPage = exercisesWithTimesUsed.length > EXERCISE_LIMIT;
-      const results = exercisesWithTimesUsed.slice(0, EXERCISE_LIMIT);
-      const nextCursor = hasNextPage ? results[results.length - 1].id : null;
+      const hasNextPage = exercises.length > EXERCISE_LIMIT;
+      const results = exercises.slice(0, EXERCISE_LIMIT);
+      const nextCursor = hasNextPage ? offset + EXERCISE_LIMIT : null;
 
       return {
         success: true,
@@ -157,27 +167,27 @@ export class ExercisesService {
   async findExerciseById(userId: number, exerciseId: number) {
     this.logger.info(`Fetching exercise by id`, { userId, exerciseId });
     try {
-      const exercise = await this.prismaService.exercise.findFirst({
-        where: {
-          AND: [
-            { id: exerciseId },
-            { OR: [{ userId }, { userId: SYSTEM_USER_ID }] },
-          ],
-        },
-        include: {
-          _count: {
-            select: {
-              workoutExercises: {
-                where: {
-                  workout: {
-                    userId: userId,
-                  },
-                },
-              },
-            },
+      const [exercise, timesUsed, favorite] = await Promise.all([
+        this.prismaService.exercise.findFirst({
+          where: {
+            AND: [
+              { id: exerciseId },
+              { OR: [{ userId }, { userId: SYSTEM_USER_ID }] },
+            ],
           },
-        },
-      });
+        }),
+        this.prismaService.workout.count({
+          where: {
+            userId,
+            status: 'COMPLETED',
+            workoutExercises: { some: { exerciseId } },
+          },
+        }),
+        this.prismaService.exerciseFavorite.findUnique({
+          where: { userId_exerciseId: { userId, exerciseId } },
+          select: { exerciseId: true },
+        }),
+      ]);
 
       if (!exercise) {
         this.logger.warn(`No exercise found with this id`, {
@@ -187,11 +197,10 @@ export class ExercisesService {
         throw new NotFoundException('found no exercise with this id');
       }
 
-      const { _count, ...filteredExercise } = exercise;
-
       return {
-        ...filteredExercise,
-        timesUsed: _count.workoutExercises,
+        ...exercise,
+        isFavorite: favorite !== null,
+        timesUsed,
       };
     } catch (error: unknown) {
       if (error instanceof HttpException) {
@@ -203,6 +212,72 @@ export class ExercisesService {
         error,
       });
       throw new InternalServerErrorException('Failed to fetch exercise');
+    }
+  }
+
+  async getFavoriteExerciseIds(userId: number) {
+    this.logger.info(`Fetching favorite exercises`, { userId });
+    try {
+      const favorites = await this.prismaService.exerciseFavorite.findMany({
+        where: { userId },
+        select: { exerciseId: true },
+      });
+
+      return { exerciseIds: favorites.map(({ exerciseId }) => exerciseId) };
+    } catch (error: unknown) {
+      this.logger.error(`Failed to fetch favorite exercises`, {
+        userId,
+        error,
+      });
+      throw new InternalServerErrorException(
+        'Failed to fetch favorite exercises',
+      );
+    }
+  }
+
+  async favoriteExercise(userId: number, exerciseId: number) {
+    this.logger.info(`Favoriting exercise`, { userId, exerciseId });
+    try {
+      await this.ensureExerciseAvailable(userId, exerciseId);
+      await this.prismaService.exerciseFavorite.upsert({
+        where: { userId_exerciseId: { userId, exerciseId } },
+        create: { userId, exerciseId },
+        update: {},
+      });
+
+      return { exerciseId, isFavorite: true };
+    } catch (error: unknown) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      this.logger.error(`Failed to favorite exercise`, {
+        userId,
+        exerciseId,
+        error,
+      });
+      throw new InternalServerErrorException('Failed to favorite exercise');
+    }
+  }
+
+  async unfavoriteExercise(userId: number, exerciseId: number) {
+    this.logger.info(`Unfavoriting exercise`, { userId, exerciseId });
+    try {
+      await this.ensureExerciseAvailable(userId, exerciseId);
+      await this.prismaService.exerciseFavorite.deleteMany({
+        where: { userId, exerciseId },
+      });
+
+      return { exerciseId, isFavorite: false };
+    } catch (error: unknown) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      this.logger.error(`Failed to unfavorite exercise`, {
+        userId,
+        exerciseId,
+        error,
+      });
+      throw new InternalServerErrorException('Failed to unfavorite exercise');
     }
   }
 
@@ -341,6 +416,20 @@ export class ExercisesService {
       throw new InternalServerErrorException(
         'Failed to fetch workouts for exercise',
       );
+    }
+  }
+
+  private async ensureExerciseAvailable(userId: number, exerciseId: number) {
+    const exercise = await this.prismaService.exercise.findFirst({
+      where: {
+        id: exerciseId,
+        OR: [{ userId }, { userId: SYSTEM_USER_ID }],
+      },
+      select: { id: true },
+    });
+
+    if (!exercise) {
+      throw new NotFoundException('Exercise not found');
     }
   }
 }

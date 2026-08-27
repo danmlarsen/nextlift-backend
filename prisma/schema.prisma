@@ -21,6 +21,7 @@ model User {
   demoExpiresAt           DateTime?
   workouts                Workout[]
   exercises               Exercise[]
+  exerciseFavorites       ExerciseFavorite[]
   personalRecords         PersonalRecord[]
   emailConfirmationTokens EmailConfirmationToken[]
   passwordResetTokens     PasswordResetToken[]
@@ -66,24 +67,36 @@ model PasswordResetToken {
 }
 
 model Exercise {
-  id                    Int               @id @default(autoincrement())
+  id                    Int                @id @default(autoincrement())
   name                  String
-  user                  User?             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                  User?              @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId                Int?
-  category              String            @default("strength") // strength cardio flexibility sports yoga etc..
-  targetMuscleGroups    String[]          @default([])
-  secondaryMuscleGroups String[]          @default([])
+  category              String             @default("strength") // strength cardio flexibility sports yoga etc..
+  targetMuscleGroups    String[]           @default([])
+  secondaryMuscleGroups String[]           @default([])
   equipment             String
   // level String?      beginner intermediate expert
   // mechanic String?   compound isolation
   // force String?      push pull 
   instructions          String?
-  imageUrls             String[]          @default([])
-  videoUrls             String[]          @default([])
+  imageUrls             String[]           @default([])
+  videoUrls             String[]           @default([])
   workoutExercises      WorkoutExercise[]
+  favorites             ExerciseFavorite[]
   personalRecords       PersonalRecord[]
 
   @@unique([name, userId, equipment])
+}
+
+model ExerciseFavorite {
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     Int
+  exercise   Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  exerciseId Int
+  createdAt  DateTime @default(now())
+
+  @@id([userId, exerciseId])
+  @@index([exerciseId])
 }
 
 model Workout {
