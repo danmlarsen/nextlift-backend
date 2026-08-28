@@ -5,12 +5,14 @@ import {
   Get,
   Param,
   ParseDatePipe,
+  ParseEnumPipe,
   ParseIntPipe,
   Patch,
   Post,
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { ChartRange } from './utils/chart-period.utils';
 import { CreateWorkoutExerciseDto } from './dtos/create-workout-exercise.dto';
 import { CreateWorkoutSetDto } from './dtos/create-workout-set.dto';
 import { UpdateWorkoutDto } from './dtos/update-workout.dto';
@@ -88,8 +90,12 @@ export class WorkoutsController {
    * @throws {400} Bad Request.
    */
   @Get('chart')
-  getWorkoutChartData(@CurrentUser() user: AuthUser) {
-    return this.workoutQuery.getWorkoutChartData(user.id);
+  getWorkoutChartData(
+    @CurrentUser() user: AuthUser,
+    @Query('range', new ParseEnumPipe(ChartRange, { optional: true }))
+    range?: ChartRange,
+  ) {
+    return this.workoutQuery.getWorkoutChartData(user.id, range);
   }
 
   /**

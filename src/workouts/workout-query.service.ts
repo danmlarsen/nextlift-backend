@@ -10,6 +10,13 @@ import { calculateOneRepMax } from 'src/common/utils';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { WorkoutExerciseData } from './types/workout.types';
 import { format, subMonths } from 'date-fns';
+import {
+  CHART_GRANULARITY_SQL_UNIT,
+  CHART_RANGE_GRANULARITY,
+  ChartRange,
+  getChartRangeStart,
+  zeroFillChartPoints,
+} from './utils/chart-period.utils';
 
 @Injectable()
 export class WorkoutQueryService {
@@ -247,7 +254,76 @@ export class WorkoutQueryService {
     }
   }
 
-  async getWorkoutChartData(userId: number) {
+  async getWorkoutChartData(userId: number, range?: ChartRange) {
+    // Legacy shape for clients that don't send a range yet.
+    // TODO: remove once the frontend only calls with ?range=.
+    if (!range) return this.getLegacyWorkoutChartData(userId);
+
+    const granularity = CHART_RANGE_GRANULARITY[range];
+    this.logger.info(`Fetching workout chart data for user`, {
+      userId,
+      range,
+    });
+    try {
+      const now = new Date();
+      const from = getChartRangeStart(range, now);
+      const sqlUnit = CHART_GRANULARITY_SQL_UNIT[granularity];
+
+      const rows = await this.prismaService.$queryRaw<
+        Array<{ period: string; workouts: number; total_volume: number }>
+      >`
+      SELECT
+        to_char(date_trunc(${sqlUnit}, w."startedAt"), 'YYYY-MM-DD') AS period,
+        COUNT(DISTINCT w.id)::int AS workouts,
+        COALESCE(
+          SUM(
+            CASE WHEN ws.completed
+              THEN COALESCE(ws.weight, 0) * COALESCE(ws.reps, 0)
+              ELSE 0
+            END
+          ),
+          0
+        )::float AS total_volume
+      FROM "Workout" w
+      LEFT JOIN "WorkoutExercise" we ON we."workoutId" = w.id
+      LEFT JOIN "WorkoutSet" ws ON ws."workoutExerciseId" = we.id
+      WHERE w."userId" = ${userId}
+        AND w."status" = 'COMPLETED'
+        AND w."startedAt" >= ${from}
+      GROUP BY 1
+      ORDER BY 1
+      `;
+
+      const dataByPeriod = new Map(
+        rows.map((row) => [
+          row.period,
+          {
+            workouts: row.workouts,
+            totalVolume: Math.round(row.total_volume * 100) / 100,
+          },
+        ]),
+      );
+
+      return {
+        granularity,
+        points: zeroFillChartPoints(granularity, from, now, dataByPeriod),
+      };
+    } catch (error: unknown) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      this.logger.error(`Failed to fetch workout graph data`, {
+        userId,
+        range,
+        error,
+      });
+      throw new InternalServerErrorException(
+        'Failed to fetch workout graph data',
+      );
+    }
+  }
+
+  private async getLegacyWorkoutChartData(userId: number) {
     try {
       const workouts = await this.prismaService.workout.findMany({
         where: {
@@ -357,7 +433,14 @@ export class WorkoutQueryService {
         weekly: getLatestPeriods(dataByWeek, 6),
         daily: getLatestPeriods(dataByDay, 6),
       };
-    } catch {
+    } catch (error: unknown) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      this.logger.error(`Failed to fetch workout graph data`, {
+        userId,
+        error,
+      });
       throw new InternalServerErrorException(
         'Failed to fetch workout graph data',
       );
