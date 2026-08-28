@@ -1,14 +1,16 @@
 import {
+  BadRequestException,
   HttpException,
   Injectable,
   InternalServerErrorException,
 } from '@nestjs/common';
 import { Prisma, WorkoutSet } from '@prisma/client';
+import { addWeeks } from 'date-fns';
 import { PinoLogger } from 'nestjs-pino';
 import { InjectPinoLogger } from 'nestjs-pino/InjectPinoLogger';
 import { calculateOneRepMax } from 'src/common/utils';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { WorkoutExerciseData } from './types/workout.types';
+import { WeeklyReportResult, WorkoutExerciseData } from './types/workout.types';
 import {
   CHART_GRANULARITY_SQL_UNIT,
   CHART_RANGE_GRANULARITY,
@@ -16,6 +18,7 @@ import {
   getChartRangeStart,
   zeroFillChartPoints,
 } from './utils/chart-period.utils';
+import { countWeekStreak } from './utils/week-streak.utils';
 
 @Injectable()
 export class WorkoutQueryService {
@@ -212,6 +215,135 @@ export class WorkoutQueryService {
       throw new InternalServerErrorException(
         'Failed to calculate workout stats',
       );
+    }
+  }
+
+  async getWeeklyReport(
+    userId: number,
+    weekStart: Date,
+  ): Promise<WeeklyReportResult> {
+    const now = new Date();
+    if (weekStart > now) {
+      throw new BadRequestException('weekStart cannot be in the future');
+    }
+    // Half-open week window; weekStart is the client's local Monday 00:00.
+    const weekEnd = addWeeks(weekStart, 1);
+    const isCurrentWeek = now >= weekStart && now < weekEnd;
+
+    this.logger.info(`Building weekly report for user`, { userId, weekStart });
+    try {
+      const [totalWorkouts, minutesResult, weightResult, offsetRows, muscles] =
+        await Promise.all([
+          this.prismaService.workout.count({
+            where: {
+              userId,
+              status: 'COMPLETED',
+              startedAt: { gte: weekStart, lt: weekEnd },
+            },
+          }),
+
+          this.prismaService.$queryRaw<[{ total_minutes: number }]>`
+      SELECT
+        COALESCE(
+          SUM("activeDuration") / 60.0,
+          0
+        ) as total_minutes
+      FROM "Workout"
+      WHERE "userId" = ${userId}
+        AND "status" = 'COMPLETED'
+        AND "startedAt" >= ${weekStart}
+        AND "startedAt" < ${weekEnd}
+    `,
+
+          this.prismaService.$queryRaw<[{ total_weight: number }]>`
+      SELECT
+        COALESCE(
+          SUM(ws.weight * ws.reps),
+          0
+        ) as total_weight
+      FROM "WorkoutSet" ws
+      INNER JOIN "WorkoutExercise" we ON ws."workoutExerciseId" = we.id
+      INNER JOIN "Workout" w ON we."workoutId" = w.id
+      WHERE w."userId" = ${userId}
+        AND w."status" = 'COMPLETED'
+        AND ws.completed = true
+        AND ws.weight IS NOT NULL
+        AND ws.reps IS NOT NULL
+        AND w."startedAt" >= ${weekStart}
+        AND w."startedAt" < ${weekEnd}
+    `,
+
+          // Distinct week offsets relative to the displayed week start
+          // (0 = displayed week, -1 = the week before, ...). Bucketing
+          // against the client's own Monday instant sidesteps the server
+          // timezone entirely.
+          this.prismaService.$queryRaw<Array<{ week_offset: number }>>`
+      SELECT DISTINCT
+        FLOOR(EXTRACT(EPOCH FROM ("startedAt" - ${weekStart})) / 604800)::int AS week_offset
+      FROM "Workout"
+      WHERE "userId" = ${userId}
+        AND "status" = 'COMPLETED'
+        AND "startedAt" < ${weekEnd}
+      ORDER BY week_offset DESC
+      LIMIT 520
+    `,
+
+          // Engagement per muscle group: completed non-warmup sets,
+          // target muscles at 1.0, secondary at 0.5 (deduped against target).
+          this.prismaService.$queryRaw<
+            Array<{ muscleGroup: string; score: number; sets: number }>
+          >`
+      SELECT
+        mg.muscle AS "muscleGroup",
+        SUM(mg.factor)::float AS score,
+        COUNT(*)::int AS sets
+      FROM "Workout" w
+      INNER JOIN "WorkoutExercise" we ON we."workoutId" = w.id
+      INNER JOIN "Exercise" e ON e.id = we."exerciseId"
+      INNER JOIN "WorkoutSet" ws ON ws."workoutExerciseId" = we.id
+      CROSS JOIN LATERAL (
+        SELECT t.muscle, 1.0::float AS factor
+        FROM unnest(e."targetMuscleGroups") AS t(muscle)
+        UNION ALL
+        SELECT s.muscle, 0.5::float AS factor
+        FROM unnest(e."secondaryMuscleGroups") AS s(muscle)
+        WHERE NOT (s.muscle = ANY(e."targetMuscleGroups"))
+      ) mg
+      WHERE w."userId" = ${userId}
+        AND w."status" = 'COMPLETED'
+        AND w."startedAt" >= ${weekStart}
+        AND w."startedAt" < ${weekEnd}
+        AND ws.completed = true
+        AND ws.type <> 'warmup'
+      GROUP BY mg.muscle
+      ORDER BY score DESC
+    `,
+        ]);
+
+      return {
+        totalWorkouts,
+        totalMinutes: Math.round(minutesResult[0]?.total_minutes || 0),
+        totalWeightLifted:
+          Math.round((weightResult[0]?.total_weight || 0) * 100) / 100,
+        weekStreak: countWeekStreak(
+          offsetRows.map((row) => row.week_offset),
+          { isCurrentWeek },
+        ),
+        muscles: muscles.map((muscle) => ({
+          ...muscle,
+          score: Math.round(muscle.score * 10) / 10,
+        })),
+      };
+    } catch (error: unknown) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      this.logger.error(`Failed to build weekly report`, {
+        userId,
+        weekStart,
+        error,
+      });
+      throw new InternalServerErrorException('Failed to build weekly report');
     }
   }
 

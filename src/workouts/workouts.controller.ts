@@ -115,6 +115,20 @@ export class WorkoutsController {
   }
 
   /**
+   * Get the weekly report (stats, week streak, muscle engagement) for the
+   * week starting at the given instant
+   * @throws {401} Unauthorized.
+   * @throws {400} Bad Request.
+   */
+  @Get('weekly-report')
+  getWeeklyReport(
+    @CurrentUser() user: AuthUser,
+    @Query('weekStart', new ParseDatePipe()) weekStart: Date,
+  ) {
+    return this.workoutQuery.getWeeklyReport(user.id, weekStart);
+  }
+
+  /**
    * Get the current active workout
    * @throws {401} Unauthorized.
    * @throws {404} No active workout found.

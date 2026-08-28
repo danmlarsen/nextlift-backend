@@ -22,3 +22,17 @@ export type WorkoutExerciseData = {
   exercise: ExerciseData;
   workoutSets: WorkoutSetData[];
 };
+
+export type WeeklyReportMuscle = {
+  muscleGroup: string;
+  score: number;
+  sets: number;
+};
+
+export type WeeklyReportResult = {
+  totalWorkouts: number;
+  totalMinutes: number;
+  totalWeightLifted: number;
+  weekStreak: number;
+  muscles: WeeklyReportMuscle[];
+};
