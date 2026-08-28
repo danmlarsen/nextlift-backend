@@ -11,6 +11,7 @@ import { UpdateExerciseDto } from './dtos/update-exercise.dto';
 import { SYSTEM_USER_ID } from 'src/common/constants';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { Prisma } from '@prisma/client';
+import { subMonths } from 'date-fns';
 
 type RankedExercise = {
   id: number;
@@ -415,6 +416,66 @@ export class ExercisesService {
       });
       throw new InternalServerErrorException(
         'Failed to fetch workouts for exercise',
+      );
+    }
+  }
+
+  /**
+   * Weekly progression of the best estimated 1RM (Epley) for one exercise
+   * over the last 6 months. Weeks without sets are omitted — a gap is
+   * meaningful for a single exercise, unlike the dashboard-wide chart.
+   */
+  async getExerciseChartData(userId: number, exerciseId: number) {
+    this.logger.info(`Fetching exercise chart data`, { userId, exerciseId });
+    try {
+      await this.ensureExerciseAvailable(userId, exerciseId);
+
+      const from = subMonths(new Date(), 6);
+
+      const rows = await this.prismaService.$queryRaw<
+        Array<{ period: string; estimated_one_rep_max: number }>
+      >`
+      SELECT
+        to_char(date_trunc('week', w."startedAt"), 'YYYY-MM-DD') AS period,
+        MAX(
+          ws.weight *
+            (CASE WHEN ws.reps = 1 THEN 1 ELSE 1 + ws.reps / 30.0 END)
+        )::float AS estimated_one_rep_max
+      FROM "WorkoutSet" ws
+      INNER JOIN "WorkoutExercise" we ON ws."workoutExerciseId" = we.id
+      INNER JOIN "Workout" w ON we."workoutId" = w.id
+      WHERE w."userId" = ${userId}
+        AND w."status" = 'COMPLETED'
+        AND we."exerciseId" = ${exerciseId}
+        AND ws.completed = true
+        AND ws.type <> 'warmup'
+        AND ws.weight IS NOT NULL
+        AND ws.reps IS NOT NULL
+        AND ws.reps > 0
+        AND w."startedAt" >= ${from}
+      GROUP BY 1
+      ORDER BY 1
+      `;
+
+      return {
+        granularity: 'weekly' as const,
+        points: rows.map((row) => ({
+          period: row.period,
+          estimatedOneRepMax:
+            Math.round(row.estimated_one_rep_max * 100) / 100,
+        })),
+      };
+    } catch (error: unknown) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      this.logger.error(`Failed to fetch exercise chart data`, {
+        userId,
+        exerciseId,
+        error,
+      });
+      throw new InternalServerErrorException(
+        'Failed to fetch exercise chart data',
       );
     }
   }

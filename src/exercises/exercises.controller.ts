@@ -127,6 +127,19 @@ export class ExercisesController {
   }
 
   /**
+   * Get weekly estimated-1RM chart data for a specific exercise
+   * @throws {401} Unauthorized.
+   * @throws {404} Exercise not found.
+   */
+  @Get(':exerciseId/chart')
+  getExerciseChartData(
+    @CurrentUser() user: AuthUser,
+    @Param('exerciseId', ParseIntPipe) exerciseId: number,
+  ) {
+    return this.exercisesService.getExerciseChartData(user.id, exerciseId);
+  }
+
+  /**
    * Get workouts that use a specific exercise
    * @throws {401} Unauthorized.
    * @throws {404} Exercise not found.
