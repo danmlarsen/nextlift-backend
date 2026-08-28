@@ -92,8 +92,7 @@ export class WorkoutsController {
   @Get('chart')
   getWorkoutChartData(
     @CurrentUser() user: AuthUser,
-    @Query('range', new ParseEnumPipe(ChartRange, { optional: true }))
-    range?: ChartRange,
+    @Query('range', new ParseEnumPipe(ChartRange)) range: ChartRange,
   ) {
     return this.workoutQuery.getWorkoutChartData(user.id, range);
   }

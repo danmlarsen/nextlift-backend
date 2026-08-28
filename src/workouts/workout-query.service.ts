@@ -9,7 +9,6 @@ import { InjectPinoLogger } from 'nestjs-pino/InjectPinoLogger';
 import { calculateOneRepMax } from 'src/common/utils';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { WorkoutExerciseData } from './types/workout.types';
-import { format, subMonths } from 'date-fns';
 import {
   CHART_GRANULARITY_SQL_UNIT,
   CHART_RANGE_GRANULARITY,
@@ -187,6 +186,7 @@ export class WorkoutQueryService {
       INNER JOIN "Workout" w ON we."workoutId" = w.id
       WHERE w."userId" = ${userId}
         AND w."status" = 'COMPLETED'
+        AND ws.completed = true
         AND ws.weight IS NOT NULL
         AND ws.reps IS NOT NULL
         ${options?.from ? Prisma.sql`AND w."startedAt" >= ${options.from}` : Prisma.empty}
@@ -254,11 +254,7 @@ export class WorkoutQueryService {
     }
   }
 
-  async getWorkoutChartData(userId: number, range?: ChartRange) {
-    // Legacy shape for clients that don't send a range yet.
-    // TODO: remove once the frontend only calls with ?range=.
-    if (!range) return this.getLegacyWorkoutChartData(userId);
-
+  async getWorkoutChartData(userId: number, range: ChartRange) {
     const granularity = CHART_RANGE_GRANULARITY[range];
     this.logger.info(`Fetching workout chart data for user`, {
       userId,
@@ -315,130 +311,6 @@ export class WorkoutQueryService {
       this.logger.error(`Failed to fetch workout graph data`, {
         userId,
         range,
-        error,
-      });
-      throw new InternalServerErrorException(
-        'Failed to fetch workout graph data',
-      );
-    }
-  }
-
-  private async getLegacyWorkoutChartData(userId: number) {
-    try {
-      const workouts = await this.prismaService.workout.findMany({
-        where: {
-          userId,
-          status: 'COMPLETED',
-          startedAt: { gte: subMonths(new Date(), 6) },
-        },
-        orderBy: { startedAt: 'asc' },
-        include: {
-          workoutExercises: {
-            include: {
-              exercise: { select: { name: true, category: true } },
-              workoutSets: {
-                select: {
-                  type: true,
-                  reps: true,
-                  weight: true,
-                  duration: true,
-                  completed: true,
-                },
-              },
-            },
-          },
-        },
-      });
-
-      // Aggregate by month
-      const dataByMonth = workouts.reduce((acc, workout) => {
-        const date = new Date(workout.startedAt);
-        const monthKey = format(date, 'yyyy-MM');
-
-        if (!acc.has(monthKey)) {
-          acc.set(monthKey, {
-            period: monthKey,
-            workouts: 0,
-            totalVolume: 0,
-          });
-        }
-
-        const entry = acc.get(monthKey)!;
-        entry.totalVolume += this.calculateExerciseTotalWeight(
-          workout.workoutExercises,
-        );
-        entry.workouts++;
-        return acc;
-      }, new Map<string, { period: string; workouts: number; totalVolume: number }>());
-
-      // Aggregate by week (ISO week format: yyyy-'W'ww)
-      const dataByWeek = workouts.reduce((acc, workout) => {
-        const date = new Date(workout.startedAt);
-        const weekKey = format(date, "yyyy-'W'II"); // ISO week number
-
-        if (!acc.has(weekKey)) {
-          acc.set(weekKey, {
-            period: weekKey,
-            workouts: 0,
-            totalVolume: 0,
-          });
-        }
-
-        const entry = acc.get(weekKey)!;
-        entry.totalVolume += this.calculateExerciseTotalWeight(
-          workout.workoutExercises,
-        );
-        entry.workouts++;
-        return acc;
-      }, new Map<string, { period: string; workouts: number; totalVolume: number }>());
-
-      // Aggregate by day
-      const dataByDay = workouts.reduce((acc, workout) => {
-        const date = new Date(workout.startedAt);
-        const dayKey = format(date, 'yyyy-MM-dd');
-
-        if (!acc.has(dayKey)) {
-          acc.set(dayKey, {
-            period: dayKey,
-            workouts: 0,
-            totalVolume: 0,
-          });
-        }
-
-        const entry = acc.get(dayKey)!;
-        entry.totalVolume += this.calculateExerciseTotalWeight(
-          workout.workoutExercises,
-        );
-        entry.workouts++;
-        return acc;
-      }, new Map<string, { period: string; workouts: number; totalVolume: number }>());
-
-      // Get latest periods for each aggregation
-      const getLatestPeriods = (
-        data: Map<
-          string,
-          { period: string; workouts: number; totalVolume: number }
-        >,
-        limit: number,
-      ): Array<{ period: string; workouts: number; totalVolume: number }> => {
-        return Array.from(data.entries())
-          .sort(([a], [b]) => b.localeCompare(a)) // Sort descending by period key
-          .slice(0, limit)
-          .map(([, value]) => value)
-          .reverse(); // Reverse to get chronological order
-      };
-
-      return {
-        monthly: getLatestPeriods(dataByMonth, 6),
-        weekly: getLatestPeriods(dataByWeek, 6),
-        daily: getLatestPeriods(dataByDay, 6),
-      };
-    } catch (error: unknown) {
-      if (error instanceof HttpException) {
-        throw error;
-      }
-      this.logger.error(`Failed to fetch workout graph data`, {
-        userId,
         error,
       });
       throw new InternalServerErrorException(
