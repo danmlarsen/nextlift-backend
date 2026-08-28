@@ -461,8 +461,7 @@ export class ExercisesService {
         granularity: 'weekly' as const,
         points: rows.map((row) => ({
           period: row.period,
-          estimatedOneRepMax:
-            Math.round(row.estimated_one_rep_max * 100) / 100,
+          estimatedOneRepMax: Math.round(row.estimated_one_rep_max * 100) / 100,
         })),
       };
     } catch (error: unknown) {
