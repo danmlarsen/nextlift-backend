@@ -58,6 +58,7 @@ const mockUsersService: Partial<UsersService> = {
     .mockImplementation((id: number, data: Prisma.UserUpdateInput) => {
       return Promise.resolve({ ...mockUser, ...data });
     }),
+  cleanupStaleUnconfirmedUsers: jest.fn().mockResolvedValue(undefined),
 };
 
 const mockEmailService = {
@@ -191,6 +192,20 @@ describe('AuthService', () => {
         updatedAt: expect.any(Date),
       });
       expect(result.password).toBeDefined();
+    });
+
+    it('should prune stale unconfirmed users before the duplicate-email check', async () => {
+      await service.registerUser(newUserInput);
+
+      const cleanupMock =
+        mockUsersService.cleanupStaleUnconfirmedUsers as jest.Mock;
+      const getUserMock = mockUsersService.getUser as jest.Mock;
+      expect(cleanupMock).toHaveBeenCalledTimes(1);
+      // Pruning first is what frees an email squatted by an abandoned
+      // registration, so the order is part of the contract.
+      expect(cleanupMock.mock.invocationCallOrder[0]).toBeLessThan(
+        getUserMock.mock.invocationCallOrder[0],
+      );
     });
 
     it('should handle createUser failure', async () => {

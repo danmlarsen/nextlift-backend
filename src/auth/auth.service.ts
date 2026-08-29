@@ -39,6 +39,13 @@ export class AuthService {
       email: data.email,
     });
     try {
+      // A suspended Fly machine cannot run the scheduled 04:00 cleanup, so
+      // registration traffic doubles as the trigger (same free-tier pattern as
+      // demo cleanup). Running it before the duplicate check below also frees
+      // an email squatted by an abandoned unconfirmed registration; the
+      // cleanup swallows its own errors, so it cannot fail the registration.
+      await this.usersService.cleanupStaleUnconfirmedUsers();
+
       const foundUser = await this.usersService.getUser({ email: data.email });
       if (foundUser) {
         this.logger.warn(`Registration failed: Email already in use`, {

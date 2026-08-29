@@ -4,10 +4,12 @@ import {
   InternalServerErrorException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, UserType } from '@prisma/client';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from 'src/prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
+import { UNCONFIRMED_USER_MAX_AGE_DAYS } from 'src/common/constants';
 
 @Injectable()
 export class UsersService {
@@ -59,6 +61,56 @@ export class UsersService {
         error,
       });
       throw new InternalServerErrorException('Failed to update user');
+    }
+  }
+
+  // Prune abandoned registrations: never confirmed, never logged in, past the
+  // retention window. The lastLoginAt guard protects any legacy account that
+  // was allowed to log in before email confirmation became mandatory.
+  @Cron(CronExpression.EVERY_DAY_AT_4AM)
+  async cleanupStaleUnconfirmedUsers() {
+    try {
+      this.logger.info('Starting cleanup of stale unconfirmed users');
+      const cutoff = new Date(
+        Date.now() - UNCONFIRMED_USER_MAX_AGE_DAYS * 24 * 60 * 60 * 1000,
+      );
+      const whereClause = {
+        userType: UserType.REGULAR,
+        isEmailConfirmed: false,
+        lastLoginAt: null,
+        createdAt: { lt: cutoff },
+      };
+
+      const usersToDelete = await this.prismaService.user.findMany({
+        where: whereClause,
+      });
+
+      let deletedCount = 0;
+      if (usersToDelete.length > 0) {
+        const result = await this.prismaService.$transaction(async (tx) => {
+          await tx.deletedUser.createMany({
+            data: usersToDelete.map((user) => ({
+              originalUserId: user.id,
+              email: user.email,
+              createdAt: user.createdAt,
+            })),
+          });
+
+          // Re-evaluating the filter (instead of deleting by id) lets a user
+          // who confirmed between the two queries survive, at worst leaving a
+          // stray tombstone row.
+          return tx.user.deleteMany({ where: whereClause });
+        });
+        deletedCount = result.count;
+      }
+      this.logger.info('Completed cleanup of stale unconfirmed users', {
+        deletedCount,
+      });
+    } catch (error: unknown) {
+      // Pruning must never break the request that triggered it.
+      this.logger.error('Failed to clean up stale unconfirmed users', {
+        error,
+      });
     }
   }
 
