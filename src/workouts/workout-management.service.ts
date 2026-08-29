@@ -10,7 +10,10 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { UpdateWorkoutDto } from './dtos/update-workout.dto';
 import { Prisma, WorkoutStatus } from '@prisma/client';
 import { CreateWorkoutDto } from './dtos/create-workout.dto';
+import { CreateWorkoutFromTemplateDto } from './dtos/create-workout-from-template.dto';
 import { FULL_WORKOUT_INCLUDE } from './const/full-workout-include';
+import { mapTemplateSetsToWorkoutSetCreates } from './utils/template-copy.utils';
+import { WorkoutExerciseService } from './workout-exercise.service';
 import { PinoLogger } from 'nestjs-pino/PinoLogger';
 import { InjectPinoLogger } from 'nestjs-pino';
 import { PersonalRecordsService } from 'src/personal-records/personal-records.service';
@@ -20,6 +23,7 @@ export class WorkoutManagementService {
   constructor(
     private readonly prismaService: PrismaService,
     private readonly personalRecordsService: PersonalRecordsService,
+    private readonly workoutExerciseService: WorkoutExerciseService,
     @InjectPinoLogger(WorkoutManagementService.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -240,6 +244,97 @@ export class WorkoutManagementService {
       }
       this.logger.error(`Failed to create active workout`, { userId, error });
       throw new InternalServerErrorException('Failed to create active workout');
+    }
+  }
+
+  async createWorkoutFromTemplate(
+    userId: number,
+    data: CreateWorkoutFromTemplateDto,
+  ) {
+    this.logger.info(`Creating workout from template`, { userId, data });
+    try {
+      const foundWorkout = await this.getWorkout(userId, { status: 'ACTIVE' });
+      if (foundWorkout) {
+        this.logger.warn(
+          `User tried to create a workout from a template but already has an active workout`,
+          { userId },
+        );
+        throw new ConflictException('Already have an active workout');
+      }
+
+      const template = await this.prismaService.workoutTemplate.findFirst({
+        where: { id: data.templateId, userId },
+        include: {
+          workoutTemplateExercises: {
+            orderBy: { exerciseOrder: 'asc' },
+            include: {
+              workoutTemplateSets: {
+                orderBy: [{ setNumber: 'asc' }, { createdAt: 'asc' }],
+              },
+            },
+          },
+        },
+      });
+
+      if (!template) {
+        this.logger.warn(
+          `User tried to create a workout from a template that does not exist or they do not own`,
+          { userId, templateId: data.templateId },
+        );
+        throw new ForbiddenException('Not allowed');
+      }
+
+      // One instant shared by the previous-exercise lookups and the created
+      // workout, so the hint links agree with the workout's startedAt.
+      const startedAt = new Date();
+
+      const previousWorkoutExercises = await Promise.all(
+        template.workoutTemplateExercises.map((templateExercise) =>
+          this.workoutExerciseService.findPreviousWorkoutExercise(
+            userId,
+            templateExercise.exerciseId,
+            startedAt,
+          ),
+        ),
+      );
+
+      return await this.prismaService.workout.create({
+        data: {
+          userId,
+          status: 'ACTIVE',
+          title: template.name,
+          notes: template.notes,
+          startedAt,
+          workoutExercises: {
+            create: template.workoutTemplateExercises.map(
+              (templateExercise, index) => ({
+                exerciseId: templateExercise.exerciseId,
+                exerciseOrder: index + 1,
+                notes: templateExercise.notes,
+                previousWorkoutExerciseId: previousWorkoutExercises[index]?.id,
+                workoutSets: {
+                  create: mapTemplateSetsToWorkoutSetCreates(
+                    templateExercise.workoutTemplateSets,
+                  ),
+                },
+              }),
+            ),
+          },
+        },
+        include: FULL_WORKOUT_INCLUDE,
+      });
+    } catch (error: unknown) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      this.logger.error(`Failed to create workout from template`, {
+        userId,
+        data,
+        error,
+      });
+      throw new InternalServerErrorException(
+        'Failed to create workout from template',
+      );
     }
   }
 

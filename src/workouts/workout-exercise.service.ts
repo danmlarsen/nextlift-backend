@@ -276,7 +276,7 @@ export class WorkoutExerciseService {
     }
   }
 
-  private async findPreviousWorkoutExercise(
+  async findPreviousWorkoutExercise(
     userId: number,
     exerciseId: number,
     currentWorkoutStartedAt: Date,

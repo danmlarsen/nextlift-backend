@@ -14,6 +14,7 @@ import { minutes, ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { BodyMeasurementsModule } from './body-measurements/body-measurements.module';
 import { PersonalRecordsModule } from './personal-records/personal-records.module';
+import { WorkoutTemplatesModule } from './workout-templates/workout-templates.module';
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { PersonalRecordsModule } from './personal-records/personal-records.modul
     ScheduleModule.forRoot(),
     BodyMeasurementsModule,
     PersonalRecordsModule,
+    WorkoutTemplatesModule,
   ],
   controllers: [],
   providers: [

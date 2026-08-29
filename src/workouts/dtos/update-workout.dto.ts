@@ -11,8 +11,8 @@ import {
 export class UpdateWorkoutDto {
   @IsString()
   @IsOptional()
-  @Length(2, 32, {
-    message: 'Title must be minimum 2 characters and not exceed 32 characters',
+  @Length(2, 50, {
+    message: 'Title must be minimum 2 characters and not exceed 50 characters',
   })
   title: string;
 

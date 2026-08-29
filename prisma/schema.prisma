@@ -20,6 +20,7 @@ model User {
   isActive                Boolean                  @default(true)
   demoExpiresAt           DateTime?
   workouts                Workout[]
+  workoutTemplates        WorkoutTemplate[]
   exercises               Exercise[]
   exerciseFavorites       ExerciseFavorite[]
   personalRecords         PersonalRecord[]
@@ -67,23 +68,24 @@ model PasswordResetToken {
 }
 
 model Exercise {
-  id                    Int                @id @default(autoincrement())
-  name                  String
-  user                  User?              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId                Int?
-  category              String             @default("strength") // strength cardio flexibility sports yoga etc..
-  targetMuscleGroups    String[]           @default([])
-  secondaryMuscleGroups String[]           @default([])
-  equipment             String
+  id                       Int                       @id @default(autoincrement())
+  name                     String
+  user                     User?                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId                   Int?
+  category                 String                    @default("strength") // strength cardio flexibility sports yoga etc..
+  targetMuscleGroups       String[]                  @default([])
+  secondaryMuscleGroups    String[]                  @default([])
+  equipment                String
   // level String?      beginner intermediate expert
   // mechanic String?   compound isolation
   // force String?      push pull 
-  instructions          String?
-  imageUrls             String[]           @default([])
-  videoUrls             String[]           @default([])
-  workoutExercises      WorkoutExercise[]
-  favorites             ExerciseFavorite[]
-  personalRecords       PersonalRecord[]
+  instructions             String?
+  imageUrls                String[]                  @default([])
+  videoUrls                String[]                  @default([])
+  workoutExercises         WorkoutExercise[]
+  workoutTemplateExercises WorkoutTemplateExercise[]
+  favorites                ExerciseFavorite[]
+  personalRecords          PersonalRecord[]
 
   @@unique([name, userId, equipment])
 }
@@ -151,9 +153,60 @@ model WorkoutSet {
   reps              Int?
   weight            Float?
   duration          Int?
+  // Target values carried over when the workout was started from a template.
+  // Surfaced as input placeholders; adopted as the real values when a set is
+  // completed untouched. Written only at from-template creation, never patched.
+  suggestedReps     Int?
+  suggestedWeight   Float?
+  suggestedDuration Int?
   personalRecords   PersonalRecord[]
 
   @@index([workoutExerciseId])
+}
+
+model WorkoutTemplate {
+  id                       Int                       @id @default(autoincrement())
+  name                     String
+  notes                    String?
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+  user                     User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId                   Int
+  workoutTemplateExercises WorkoutTemplateExercise[]
+
+  @@index([userId])
+}
+
+model WorkoutTemplateExercise {
+  id                  Int                  @id @default(autoincrement())
+  workoutTemplate     WorkoutTemplate      @relation(fields: [workoutTemplateId], references: [id], onDelete: Cascade)
+  workoutTemplateId   Int
+  exercise            Exercise             @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  exerciseId          Int
+  exerciseOrder       Int
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  notes               String?
+  workoutTemplateSets WorkoutTemplateSet[]
+
+  @@index([workoutTemplateId])
+  @@index([exerciseId])
+}
+
+model WorkoutTemplateSet {
+  id                        Int                     @id @default(autoincrement())
+  workoutTemplateExercise   WorkoutTemplateExercise @relation(fields: [workoutTemplateExerciseId], references: [id], onDelete: Cascade)
+  workoutTemplateExerciseId Int
+  setNumber                 Int
+  createdAt                 DateTime                @default(now())
+  updatedAt                 DateTime                @updatedAt
+  notes                     String?
+  type                      String                  @default("normal")
+  reps                      Int?
+  weight                    Float?
+  duration                  Int?
+
+  @@index([workoutTemplateExerciseId])
 }
 
 model PersonalRecord {

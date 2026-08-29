@@ -26,6 +26,7 @@ import { WorkoutSetService } from './workout-set.service';
 import { WorkoutQueryService } from './workout-query.service';
 import { UpdateWorkoutExerciseDto } from './dtos/update-workout-exercise.dto';
 import { CreateWorkoutDto } from './dtos/create-workout.dto';
+import { CreateWorkoutFromTemplateDto } from './dtos/create-workout-from-template.dto';
 import { ApiBearerAuth } from '@nestjs/swagger';
 
 @ApiBearerAuth()
@@ -172,6 +173,20 @@ export class WorkoutsController {
   @Post('active')
   createActiveWorkout(@CurrentUser() user: AuthUser) {
     return this.workoutManagement.createActiveWorkout(user.id);
+  }
+
+  /**
+   * Create a new active workout from a workout template
+   * @throws {401} Unauthorized.
+   * @throws {403} Workout template not found.
+   * @throws {409} Active workout already exists.
+   */
+  @Post('from-template')
+  createWorkoutFromTemplate(
+    @CurrentUser() user: AuthUser,
+    @Body() body: CreateWorkoutFromTemplateDto,
+  ) {
+    return this.workoutManagement.createWorkoutFromTemplate(user.id, body);
   }
 
   /**
