@@ -133,7 +133,7 @@ describe('WorkoutManagementService', () => {
             status: 'ACTIVE',
             title: 'Push Day',
             notes: 'template notes',
-            startedAt: expect.any(Date),
+            startedAt: expect.any(Date) as Date,
             workoutExercises: {
               create: [
                 {

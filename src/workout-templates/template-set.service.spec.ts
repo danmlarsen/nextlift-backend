@@ -107,7 +107,9 @@ describe('TemplateSetService', () => {
                 where: { id: templateExerciseId },
                 data: {
                   workoutTemplateSets: {
-                    create: expect.objectContaining({ setNumber: 4 }),
+                    create: expect.objectContaining({
+                      setNumber: 4,
+                    }) as object,
                   },
                 },
               },

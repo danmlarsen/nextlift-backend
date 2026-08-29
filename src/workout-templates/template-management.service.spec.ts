@@ -73,7 +73,7 @@ describe('TemplateManagementService', () => {
 
       expect(templateCreate).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ name: 'Push Day', userId }),
+          data: expect.objectContaining({ name: 'Push Day', userId }) as object,
         }),
       );
     });
@@ -213,7 +213,7 @@ describe('TemplateManagementService', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             workoutTemplateExercises: { create: [] },
-          }),
+          }) as object,
         }),
       );
     });
