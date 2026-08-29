@@ -27,6 +27,21 @@ model User {
   emailConfirmationTokens EmailConfirmationToken[]
   passwordResetTokens     PasswordResetToken[]
   bodyMeasurements        BodyMeasurement[]
+  profile                 UserProfile?
+}
+
+model UserProfile {
+  id            Int            @id @default(autoincrement())
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId        Int            @unique
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  heightCm      Float?
+  birthDate     DateTime?      @db.Date
+  sex           Sex?
+  activityLevel ActivityLevel?
+  goalWeight    Float?
+  weightGoal    WeightGoal?
 }
 
 model DeletedUser {
@@ -245,6 +260,13 @@ model BodyMeasurement {
   fatPercent Float?
   notes      String?
   imageUrl   String?
+  neckCm     Float?
+  chestCm    Float?
+  waistCm    Float?
+  hipsCm     Float?
+  armCm      Float?
+  thighCm    Float?
+  calfCm     Float?
 
   @@index([userId, measuredAt])
 }
@@ -265,4 +287,23 @@ enum RecordType {
   MAX_WEIGHT
   ONE_REP_MAX
   MAX_SET_VOLUME
+}
+
+enum Sex {
+  MALE
+  FEMALE
+}
+
+enum ActivityLevel {
+  SEDENTARY
+  LIGHT
+  MODERATE
+  ACTIVE
+  VERY_ACTIVE
+}
+
+enum WeightGoal {
+  LOSE
+  MAINTAIN
+  GAIN
 }

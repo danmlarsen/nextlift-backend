@@ -13,6 +13,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { minutes, ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { BodyMeasurementsModule } from './body-measurements/body-measurements.module';
+import { UserProfileModule } from './user-profile/user-profile.module';
 import { PersonalRecordsModule } from './personal-records/personal-records.module';
 import { WorkoutTemplatesModule } from './workout-templates/workout-templates.module';
 
@@ -57,6 +58,7 @@ import { WorkoutTemplatesModule } from './workout-templates/workout-templates.mo
     HealthModule,
     ScheduleModule.forRoot(),
     BodyMeasurementsModule,
+    UserProfileModule,
     PersonalRecordsModule,
     WorkoutTemplatesModule,
   ],
