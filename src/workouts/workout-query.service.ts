@@ -482,21 +482,25 @@ export class WorkoutQueryService {
         0,
       );
 
+      // An exercise can be left with zero sets; an empty reduce with no
+      // initial value throws and would fail the whole history request.
       let bestSet: Partial<WorkoutSet | null> = null;
-      if (workoutExercise.exercise.category === 'strength') {
-        bestSet = workoutExercise.workoutSets.reduce((best, current) => {
-          const currentOneRM = calculateOneRepMax(
-            current.weight!,
-            current.reps!,
+      if (workoutExercise.workoutSets.length > 0) {
+        if (workoutExercise.exercise.category === 'strength') {
+          bestSet = workoutExercise.workoutSets.reduce((best, current) => {
+            const currentOneRM = calculateOneRepMax(
+              current.weight!,
+              current.reps!,
+            );
+            const bestOneRM = calculateOneRepMax(best.weight!, best.reps!);
+            return currentOneRM > bestOneRM ? current : best;
+          });
+        }
+        if (workoutExercise.exercise.category === 'cardio') {
+          bestSet = workoutExercise.workoutSets.reduce((best, current) =>
+            current.duration! > best.duration! ? current : best,
           );
-          const bestOneRM = calculateOneRepMax(best.weight!, best.reps!);
-          return currentOneRM > bestOneRM ? current : best;
-        });
-      }
-      if (workoutExercise.exercise.category === 'cardio') {
-        bestSet = workoutExercise.workoutSets.reduce((best, current) =>
-          current.duration! > best.duration! ? current : best,
-        );
+        }
       }
 
       return {
