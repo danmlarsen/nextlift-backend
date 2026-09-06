@@ -4,6 +4,7 @@ import { PersonalRecordsService } from 'src/personal-records/personal-records.se
 import { PrismaService } from 'src/prisma/prisma.service';
 import { WorkoutExerciseService } from './workout-exercise.service';
 import { WorkoutManagementService } from './workout-management.service';
+import { EnrollmentWorkoutService } from 'src/programs/enrollment-workout.service';
 
 describe('WorkoutManagementService', () => {
   let service: WorkoutManagementService;
@@ -78,6 +79,13 @@ describe('WorkoutManagementService', () => {
         {
           provide: WorkoutExerciseService,
           useValue: { findPreviousWorkoutExercise },
+        },
+        {
+          provide: EnrollmentWorkoutService,
+          useValue: {
+            onWorkoutCompleted: jest.fn().mockResolvedValue(null),
+            onWorkoutDeleted: jest.fn().mockResolvedValue(undefined),
+          },
         },
         {
           provide: 'PinoLogger:WorkoutManagementService',

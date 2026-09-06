@@ -16,6 +16,7 @@ import { BodyMeasurementsModule } from './body-measurements/body-measurements.mo
 import { UserProfileModule } from './user-profile/user-profile.module';
 import { PersonalRecordsModule } from './personal-records/personal-records.module';
 import { WorkoutTemplatesModule } from './workout-templates/workout-templates.module';
+import { ProgramsModule } from './programs/programs.module';
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import { WorkoutTemplatesModule } from './workout-templates/workout-templates.mo
     UserProfileModule,
     PersonalRecordsModule,
     WorkoutTemplatesModule,
+    ProgramsModule,
   ],
   controllers: [],
   providers: [

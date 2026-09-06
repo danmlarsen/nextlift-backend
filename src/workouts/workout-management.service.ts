@@ -17,6 +17,10 @@ import { WorkoutExerciseService } from './workout-exercise.service';
 import { PinoLogger } from 'nestjs-pino/PinoLogger';
 import { InjectPinoLogger } from 'nestjs-pino';
 import { PersonalRecordsService } from 'src/personal-records/personal-records.service';
+import {
+  EnrollmentWorkoutService,
+  ProgressionSummary,
+} from 'src/programs/enrollment-workout.service';
 
 @Injectable()
 export class WorkoutManagementService {
@@ -24,9 +28,52 @@ export class WorkoutManagementService {
     private readonly prismaService: PrismaService,
     private readonly personalRecordsService: PersonalRecordsService,
     private readonly workoutExerciseService: WorkoutExerciseService,
+    private readonly enrollmentWorkoutService: EnrollmentWorkoutService,
     @InjectPinoLogger(WorkoutManagementService.name)
     private readonly logger: PinoLogger,
   ) {}
+
+  /**
+   * Feeds a finished program workout back into its enrollment. Progression
+   * must never fail the completion itself, so failures are only logged; a
+   * missed hook is repaired the next time the enrollment is read.
+   */
+  private async applyProgramProgression(
+    userId: number,
+    workout: { id: number; programDayLogId: number | null },
+  ): Promise<ProgressionSummary | null> {
+    if (workout.programDayLogId === null) return null;
+    try {
+      return await this.enrollmentWorkoutService.onWorkoutCompleted(
+        userId,
+        workout.id,
+      );
+    } catch (error: unknown) {
+      this.logger.error(`Program progression failed`, {
+        userId,
+        workoutId: workout.id,
+        error,
+      });
+      return null;
+    }
+  }
+
+  /** Detaches a program day from a workout that is about to be deleted. */
+  private async detachProgramDay(
+    userId: number,
+    workout: { id: number; programDayLogId: number | null },
+  ) {
+    if (workout.programDayLogId === null) return;
+    try {
+      await this.enrollmentWorkoutService.onWorkoutDeleted(userId, workout.id);
+    } catch (error: unknown) {
+      this.logger.error(`Program day detach failed`, {
+        userId,
+        workoutId: workout.id,
+        error,
+      });
+    }
+  }
 
   /**
    * Exercises with a record anchored in this workout. Captured before a
@@ -104,6 +151,7 @@ export class WorkoutManagementService {
               completedAt: expiredAt,
             },
           });
+          await this.applyProgramProgression(userId, workout);
           return null;
         }
       }
@@ -180,6 +228,12 @@ export class WorkoutManagementService {
     try {
       // Captured before the delete: the cascade removes the anchored rows.
       const affectedExerciseIds = await this.getRecordExerciseIds(userId, id);
+
+      const existing = await this.prismaService.workout.findFirst({
+        where: { id, userId },
+        select: { id: true, programDayLogId: true },
+      });
+      if (existing) await this.detachProgramDay(userId, existing);
 
       const deletedWorkout = await this.prismaService.workout.delete({
         where: { id, userId },
@@ -373,7 +427,7 @@ export class WorkoutManagementService {
             )
           : workout.activeDuration;
 
-      return await this.prismaService.workout.update({
+      const completedWorkout = await this.prismaService.workout.update({
         where: { id: workoutId },
         data: {
           status: 'COMPLETED',
@@ -382,6 +436,14 @@ export class WorkoutManagementService {
         },
         include: FULL_WORKOUT_INCLUDE,
       });
+
+      const progression = await this.applyProgramProgression(
+        userId,
+        completedWorkout,
+      );
+      return progression
+        ? { ...completedWorkout, progression }
+        : completedWorkout;
     } catch (error: unknown) {
       if (error instanceof HttpException) {
         throw error;
@@ -415,6 +477,7 @@ export class WorkoutManagementService {
         userId,
         workout.id,
       );
+      await this.detachProgramDay(userId, workout);
 
       const deletedWorkout = await this.prismaService.workout.delete({
         where: { id: workout.id },

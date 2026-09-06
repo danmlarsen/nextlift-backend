@@ -7,8 +7,10 @@ import {
   IsPositive,
   Max,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import { WorkoutSetType } from '../types/workout.types';
+import { RPE_VALUES } from 'src/programs/engine/rts-table';
 
 export class UpdateWorkoutSetDto {
   @IsOptional()
@@ -37,4 +39,9 @@ export class UpdateWorkoutSetDto {
   @IsOptional()
   @IsIn(Object.values(WorkoutSetType))
   type: WorkoutSetType;
+
+  /** Rating of perceived exertion, 6-10 in half steps; null clears it. */
+  @ValidateIf((_, value) => value !== null && value !== undefined)
+  @IsIn(RPE_VALUES)
+  rpe: number | null;
 }

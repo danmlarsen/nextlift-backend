@@ -18,4 +18,16 @@ export const FULL_WORKOUT_INCLUDE: Prisma.WorkoutInclude = {
       },
     },
   },
+  // Present only for workouts generated from a program day.
+  programDayLog: {
+    select: {
+      id: true,
+      enrollmentId: true,
+      cycle: true,
+      weekIndex: true,
+      dayIndex: true,
+      dayName: true,
+      status: true,
+    },
+  },
 } as const;

@@ -1,0 +1,127 @@
+import {
+  BENCH,
+  BICEPS_CURL,
+  CABLE_CRUNCH,
+  CABLE_ROW,
+  CALF_RAISE_MACHINE,
+  CHEST_SUPPORTED_ROW,
+  DB_LUNGE,
+  DB_OHP,
+  DEADLIFT,
+  double,
+  FACE_PULL,
+  HACK_SQUAT,
+  HAMMER_CURL,
+  HANGING_LEG_RAISE,
+  INCLINE_BENCH_DB,
+  LAT_PULLDOWN,
+  LATERAL_RAISE,
+  LEG_PRESS,
+  LYING_LEG_CURL,
+  OHP,
+  range,
+  RDL,
+  rirMesocycle,
+  ROW,
+  SEATED_CALF_RAISE,
+  SEATED_LEG_CURL,
+  slot,
+  SQUAT,
+  TRICEP_OVERHEAD,
+  TRICEP_PUSHDOWN,
+} from './helpers';
+import { ProgramSeed, SeedExercise, SeedExerciseRef } from './types';
+
+const meso = (
+  exercise: SeedExerciseRef,
+  key: string,
+  count: number,
+  repsMin: number,
+  repsMax: number,
+  incrementKg: number,
+  rest: number,
+  roundingKg?: number,
+): SeedExercise =>
+  slot(exercise, key, 'RPE', rirMesocycle(incrementKg, count + 2), range(count, repsMin, repsMax), {
+    rest,
+    ...(roundingKg ? { roundingKg } : {}),
+  });
+
+export const upperLowerHypertrophy: ProgramSeed = {
+  slug: 'upper-lower-hypertrophy-4-day',
+  version: 1,
+  name: 'Upper / Lower Hypertrophy Mesocycle',
+  description:
+    'A five-week hypertrophy block on Monday, Tuesday, Thursday and Friday. Effort climbs from 3 reps in reserve to 0 while one set per exercise is added each week; week five is a deload at half the volume. Loads go up whenever you reach the top of the rep range at or under the target effort.',
+  credit: "Inspired by Renaissance Periodization's hypertrophy templates (Dr. Mike Israetel)",
+  goal: 'HYPERTROPHY',
+  level: 'INTERMEDIATE',
+  scheduleMode: 'CALENDAR',
+  durationMode: 'FIXED',
+  daysPerWeek: 4,
+  effortScale: 'RIR',
+  blocks: [
+    {
+      name: 'Mesocycle',
+      weeks: [
+        { label: '3 RIR' },
+        { label: '2 RIR' },
+        { label: '1 RIR' },
+        { label: '0 RIR' },
+        { label: 'Deload', deload: true, volume: 0.5, intensity: 0.6 },
+      ],
+      days: [
+        {
+          name: 'Upper A',
+          weekday: 1,
+          exercises: [
+            meso(BENCH, 'bench', 3, 6, 10, 2.5, 150),
+            meso(ROW, 'row', 3, 8, 12, 2.5, 120),
+            meso(DB_OHP, 'db-ohp', 2, 8, 12, 2, 90, 2),
+            meso(LAT_PULLDOWN, 'lat-pulldown', 2, 10, 15, 2.5, 90),
+            meso(LATERAL_RAISE, 'lateral-raise', 2, 12, 20, 1, 60, 1),
+            meso(BICEPS_CURL, 'biceps-curl', 2, 10, 15, 1, 60, 1),
+            meso(TRICEP_PUSHDOWN, 'pushdown', 2, 10, 15, 1, 60, 1),
+          ],
+        },
+        {
+          name: 'Lower A',
+          weekday: 2,
+          exercises: [
+            meso(SQUAT, 'squat', 3, 6, 10, 2.5, 180),
+            meso(RDL, 'rdl', 3, 8, 12, 2.5, 150),
+            meso(LEG_PRESS, 'leg-press', 2, 10, 15, 5, 120, 5),
+            meso(LYING_LEG_CURL, 'leg-curl', 2, 10, 15, 2.5, 90),
+            meso(CALF_RAISE_MACHINE, 'calf-raise', 3, 10, 15, 2.5, 60),
+            slot(HANGING_LEG_RAISE, 'hlr', 'DOUBLE', double(0, 'REPS'), range(2, 10, 15), { rest: 60 }),
+          ],
+        },
+        {
+          name: 'Upper B',
+          weekday: 4,
+          exercises: [
+            meso(INCLINE_BENCH_DB, 'incline-db', 3, 8, 12, 2, 150, 2),
+            meso(CABLE_ROW, 'cable-row', 3, 8, 12, 2.5, 120),
+            meso(OHP, 'ohp', 2, 6, 10, 2.5, 120),
+            meso(CHEST_SUPPORTED_ROW, 'cs-row', 2, 10, 15, 2.5, 90),
+            meso(FACE_PULL, 'face-pull', 2, 12, 20, 1, 60, 1),
+            meso(HAMMER_CURL, 'hammer-curl', 2, 10, 15, 1, 60, 1),
+            meso(TRICEP_OVERHEAD, 'tri-overhead', 2, 10, 15, 1, 60, 1),
+          ],
+        },
+        {
+          name: 'Lower B',
+          weekday: 5,
+          exercises: [
+            meso(DEADLIFT, 'deadlift', 3, 5, 8, 5, 180),
+            meso(HACK_SQUAT, 'hack-squat', 3, 8, 12, 5, 150, 5),
+            meso(DB_LUNGE, 'db-lunge', 2, 10, 12, 2, 90, 2),
+            meso(SEATED_LEG_CURL, 'seated-leg-curl', 2, 10, 15, 2.5, 90),
+            meso(SEATED_CALF_RAISE, 'seated-calf', 3, 10, 15, 2.5, 60),
+            meso(CABLE_CRUNCH, 'cable-crunch', 2, 10, 15, 2.5, 60),
+          ],
+        },
+      ],
+    },
+  ],
+};
