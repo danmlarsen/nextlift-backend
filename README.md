@@ -84,6 +84,9 @@ npx prisma db seed       # seed system user + exercise library
   reset, demo sessions (JWT + Passport)
 - `src/users/` — account management (deletion)
 - `src/workouts/` — workouts, workout-exercises and sets
+- `src/workout-templates/` — reusable workout templates
+- `src/programs/` — training programs: authoring, curated library, enrollments
+  and the pure progression engine (`src/programs/engine/`)
 - `src/exercises/` — exercise library
 - `src/body-measurements/` — weight / body-fat / notes tracking
 - `src/email/` — SendGrid integration (with console-mock fallback)
@@ -98,11 +101,53 @@ npx prisma db seed       # seed system user + exercise library
 - JWT authentication with typed access/refresh tokens; refresh tokens are
   httpOnly-cookie-only and hashed at rest, invalidated on logout
 - Email confirmation and password reset (enumeration-safe endpoints)
-- Workout tracking with exercises, sets and personal records
+- Workout tracking with exercises, sets (incl. RPE) and personal records
+- Workout templates
+- Training programs (see below)
 - Body-measurement tracking
-- Seeded exercise library
+- Seeded exercise library and ten curated programs
 - Global rate limiting + per-IP demo-session limits + reCAPTCHA on demo login
 - Structured logging (Pino) with credential redaction
+
+## Training programs
+
+A program describes **one training cycle**: blocks of weeks, each block holding
+the weekly structure once (days → exercises → sets). Week rows carry only
+per-week metadata (deload flag, volume/intensity multipliers); set rows can be
+scoped to a week of the block for schemes that change week to week (5/3/1
+percentages). Programs run in `SEQUENCE` mode (an ordered rotation of days) or
+`CALENDAR` mode (days pinned to weekdays, Monday-start weeks), and are either
+`FIXED` in length or `OPEN_ENDED` (the cycle repeats).
+
+Progression is a strategy per exercise slot plus JSON parameters, evaluated by
+the pure engine in `src/programs/engine/` (no Nest or Prisma imports, table-
+driven specs):
+
+| Strategy | Behaviour |
+|---|---|
+| `LINEAR` | add the increment when every prescribed set is hit; consecutive failures either move to the next set×rep stage (GZCLP) or take a percentage off |
+| `DOUBLE` | fixed load until every set reaches the top of the rep range, then add the increment (`REPS` mode widens the range instead — bodyweight work) |
+| `PERCENT_TM` | loads are percentages of a training max, bumped at cycle end or per session from AMRAP reps |
+| `RPE` | top set at reps @ RPE with back-offs from the estimated 1RM, or an RIR-descending mesocycle that adds sets weekly |
+| `NONE` | targets only; may follow another slot's training max / working weight through a shared `progressionKey` |
+
+Enrolling copies the program into an immutable **snapshot** on the
+`ProgramEnrollment` (author edits never change a running program) and creates
+one state row per progression key (working weight, training max, e1RM, stage,
+fails). `POST /v1/program-enrollments/:id/workouts` resolves the day into a
+normal workout whose sets carry the prescription in `suggested*` fields plus a
+`programSetId`; completing that workout runs the engine once, updates the
+states, logs the day and advances the schedule. Users may freely edit the
+generated workout — only program-generated sets are evaluated.
+
+Curated programs live in `prisma/data/programs/` and are seeded for the system
+user (`-1`), keyed by slug and re-built when their `version` increases. The
+spec in `src/programs/seeds/` validates every seed against the real DTOs and
+the exercise library. Demo accounts are pre-enrolled in the beginner program.
+
+Nothing changes for users who never enroll: templates and free workouts behave
+exactly as before, and the completion hook short-circuits for workouts without
+a program link.
 
 ## Environment Variables
 

@@ -11,6 +11,10 @@ import { FULL_WORKOUT_INCLUDE } from './const/full-workout-include';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { PersonalRecordsService } from 'src/personal-records/personal-records.service';
 import { SYSTEM_USER_ID } from 'src/common/constants';
+import {
+  findPreviousWorkoutExercise,
+  PreviousWorkoutExercise,
+} from './utils/previous-workout-exercise';
 
 @Injectable()
 export class WorkoutExerciseService {
@@ -276,33 +280,16 @@ export class WorkoutExerciseService {
     }
   }
 
-  async findPreviousWorkoutExercise(
+  findPreviousWorkoutExercise(
     userId: number,
     exerciseId: number,
     currentWorkoutStartedAt: Date,
-  ): Promise<{ id: number; workoutSets: { setNumber: number }[] } | null> {
-    return this.prismaService.workoutExercise.findFirst({
-      where: {
-        exerciseId,
-        workout: {
-          userId,
-          status: 'COMPLETED',
-          startedAt: {
-            lt: currentWorkoutStartedAt,
-          },
-        },
-      },
-      include: {
-        workoutSets: {
-          where: { completed: true },
-          orderBy: { setNumber: 'asc' },
-        },
-      },
-      orderBy: {
-        workout: {
-          startedAt: 'desc',
-        },
-      },
-    });
+  ): Promise<PreviousWorkoutExercise | null> {
+    return findPreviousWorkoutExercise(
+      this.prismaService,
+      userId,
+      exerciseId,
+      currentWorkoutStartedAt,
+    );
   }
 }

@@ -28,6 +28,8 @@ model User {
   passwordResetTokens     PasswordResetToken[]
   bodyMeasurements        BodyMeasurement[]
   profile                 UserProfile?
+  programs                Program[]
+  programEnrollments      ProgramEnrollment[]
 }
 
 model UserProfile {
@@ -101,6 +103,7 @@ model Exercise {
   workoutTemplateExercises WorkoutTemplateExercise[]
   favorites                ExerciseFavorite[]
   personalRecords          PersonalRecord[]
+  programExercises         ProgramExercise[]
 
   @@unique([name, userId, equipment])
 }
@@ -117,21 +120,26 @@ model ExerciseFavorite {
 }
 
 model Workout {
-  id                 Int               @id @default(autoincrement())
+  id                 Int                      @id @default(autoincrement())
   title              String?
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
-  startedAt          DateTime          @default(now())
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  startedAt          DateTime                 @default(now())
   completedAt        DateTime?
-  activeDuration     Float             @default(0)
-  status             WorkoutStatus     @default(DRAFT)
+  activeDuration     Float                    @default(0)
+  status             WorkoutStatus            @default(DRAFT)
   notes              String?
-  isPaused           Boolean           @default(false)
-  pauseDuration      Float             @default(0)
+  isPaused           Boolean                  @default(false)
+  pauseDuration      Float                    @default(0)
   lastPauseStartTime DateTime?
-  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user               User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId             Int
   workoutExercises   WorkoutExercise[]
+  // Set when the workout was generated from a program day. The log (and the
+  // enrollment behind it) outlives the workout; deleting a workout only
+  // detaches it.
+  programDayLog      ProgramEnrollmentDayLog? @relation(fields: [programDayLogId], references: [id], onDelete: SetNull)
+  programDayLogId    Int?                     @unique
 
   @@index([userId, status, startedAt])
 }
@@ -150,31 +158,45 @@ model WorkoutExercise {
   previousWorkoutExercise   WorkoutExercise?  @relation("PreviousWorkoutExercise", fields: [previousWorkoutExerciseId], references: [id])
   previousWorkoutExerciseId Int?
   nextWorkoutExercise       WorkoutExercise[] @relation("PreviousWorkoutExercise")
+  // Program slot this exercise was generated for. Survives exercise swaps so
+  // progress can be followed per slot across an enrollment.
+  progressionKey            String?
 
   @@index([workoutId])
   @@index([exerciseId])
 }
 
 model WorkoutSet {
-  id                Int              @id @default(autoincrement())
-  workoutExercise   WorkoutExercise  @relation(fields: [workoutExerciseId], references: [id], onDelete: Cascade)
-  workoutExerciseId Int
-  setNumber         Int
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
-  completed         Boolean          @default(false)
-  notes             String?
-  type              String           @default("normal")
-  reps              Int?
-  weight            Float?
-  duration          Int?
+  id                   Int              @id @default(autoincrement())
+  workoutExercise      WorkoutExercise  @relation(fields: [workoutExerciseId], references: [id], onDelete: Cascade)
+  workoutExerciseId    Int
+  setNumber            Int
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  completed            Boolean          @default(false)
+  notes                String?
+  type                 String           @default("normal")
+  reps                 Int?
+  weight               Float?
+  duration             Int?
   // Target values carried over when the workout was started from a template.
   // Surfaced as input placeholders; adopted as the real values when a set is
   // completed untouched. Written only at from-template creation, never patched.
-  suggestedReps     Int?
-  suggestedWeight   Float?
-  suggestedDuration Int?
-  personalRecords   PersonalRecord[]
+  suggestedReps        Int?
+  suggestedWeight      Float?
+  suggestedDuration    Int?
+  // Rating of perceived exertion logged by the user (6-10 in 0.5 steps).
+  rpe                  Float?
+  // Program prescription carried over when the workout was started from a
+  // program day. programSetId is the set's id inside the enrollment snapshot;
+  // null means the user added the set themselves and the progression engine
+  // ignores it.
+  programSetId         Int?
+  suggestedRepsMax     Int?
+  suggestedRpe         Float?
+  suggestedRestSeconds Int?
+  suggestedAmrap       Boolean          @default(false)
+  personalRecords      PersonalRecord[]
 
   @@index([workoutExerciseId])
 }
@@ -306,4 +328,269 @@ enum WeightGoal {
   LOSE
   MAINTAIN
   GAIN
+}
+
+// ---------------------------------------------------------------------------
+// Workout programs
+//
+// A Program describes ONE training cycle: blocks of weeks, each block holding
+// the weekly structure once (days -> exercises -> sets). Week rows carry only
+// per-week metadata (deload flag, multipliers); set rows may be scoped to a
+// week-in-block for schemes that change week to week (5/3/1 percentages).
+// Progression is a strategy enum plus JSON params evaluated by the pure engine
+// in src/programs/engine. Enrollments keep an immutable JSON snapshot of the
+// program so authoring changes never disturb a running program.
+// ---------------------------------------------------------------------------
+
+model Program {
+  id           Int                 @id @default(autoincrement())
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId       Int
+  // Seed identity for curated programs (system user); null for user programs.
+  slug         String?
+  version      Int                 @default(1)
+  name         String
+  description  String?
+  // Attribution for curated programs, e.g. "Inspired by ...".
+  credit       String?
+  goal         ProgramGoal
+  level        ProgramLevel
+  scheduleMode ProgramScheduleMode @default(SEQUENCE)
+  durationMode ProgramDurationMode @default(FIXED)
+  daysPerWeek  Int
+  effortScale  EffortScale         @default(RPE)
+  visibility   ProgramVisibility   @default(PRIVATE)
+  // Reserved for share-by-link; unused until sharing ships.
+  shareToken   String?             @unique
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  blocks       ProgramBlock[]
+  enrollments  ProgramEnrollment[]
+
+  @@unique([userId, slug])
+  @@index([userId, updatedAt])
+  @@index([visibility, level, goal, daysPerWeek])
+}
+
+model ProgramBlock {
+  id         Int           @id @default(autoincrement())
+  program    Program       @relation(fields: [programId], references: [id], onDelete: Cascade)
+  programId  Int
+  blockOrder Int
+  name       String
+  focus      String?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+  weeks      ProgramWeek[]
+  days       ProgramDay[]
+
+  @@index([programId])
+}
+
+model ProgramWeek {
+  id                  Int          @id @default(autoincrement())
+  block               ProgramBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
+  blockId             Int
+  weekInBlock         Int
+  label               String?
+  isDeload            Boolean      @default(false)
+  volumeMultiplier    Float        @default(1)
+  intensityMultiplier Float        @default(1)
+
+  @@unique([blockId, weekInBlock])
+}
+
+model ProgramDay {
+  id        Int               @id @default(autoincrement())
+  block     ProgramBlock      @relation(fields: [blockId], references: [id], onDelete: Cascade)
+  blockId   Int
+  dayOrder  Int
+  name      String
+  // 1 = Monday ... 7 = Sunday. Only meaningful for CALENDAR programs.
+  weekday   Int?
+  notes     String?
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  exercises ProgramExercise[]
+
+  @@index([blockId])
+}
+
+model ProgramExercise {
+  id             Int                 @id @default(autoincrement())
+  day            ProgramDay          @relation(fields: [dayId], references: [id], onDelete: Cascade)
+  dayId          Int
+  exercise       Exercise            @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  exerciseId     Int
+  exerciseOrder  Int
+  // Slots sharing a key share one progression state (e.g. 5/3/1 main work and
+  // its supplemental sets, or the same lift on several days).
+  progressionKey String
+  strategy       ProgressionStrategy @default(NONE)
+  // Strategy parameters; shape depends on `strategy` (see engine DTOs).
+  progression    Json?
+  roundingKg     Float?
+  restSeconds    Int?
+  notes          String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  sets           ProgramSet[]
+
+  @@index([dayId])
+  @@index([exerciseId])
+}
+
+model ProgramSet {
+  id                Int             @id @default(autoincrement())
+  programExercise   ProgramExercise @relation(fields: [programExerciseId], references: [id], onDelete: Cascade)
+  programExerciseId Int
+  // null = applies to every week of the block; a number scopes the row to that
+  // week (the engine uses week-scoped rows when any exist for the week).
+  weekInBlock       Int?
+  setOrder          Int
+  type              String          @default("normal")
+  repsMin           Int?
+  repsMax           Int?
+  isAmrap           Boolean         @default(false)
+  // Percentage of the strategy's load basis (training max / working weight).
+  percent           Float?
+  // Fixed load in kg (NONE strategy with a FIXED basis).
+  weight            Float?
+  // Target effort; RIR is derived as 10 - RPE for display.
+  targetRpe         Float?
+  restSeconds       Int?
+  duration          Int?
+  notes             String?
+
+  @@index([programExerciseId])
+}
+
+model ProgramEnrollment {
+  id               Int                              @id @default(autoincrement())
+  user             User                             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId           Int
+  // The snapshot is authoritative; the program link is informational and is
+  // cleared (not cascaded) when the program is deleted.
+  program          Program?                         @relation(fields: [programId], references: [id], onDelete: SetNull)
+  programId        Int?
+  programVersion   Int
+  programName      String
+  totalWeeks       Int
+  status           EnrollmentStatus                 @default(ACTIVE)
+  // Serialized program tree (blocks -> weeks -> days -> exercises -> sets).
+  snapshot         Json
+  // CALENDAR programs: the Monday of cycle 1, week 1.
+  startDate        DateTime                         @db.Date
+  // CALENDAR programs: optional per-enrollment weekday override { dayId: 1..7 }.
+  weekdayMap       Json?
+  currentCycle     Int                              @default(1)
+  currentWeekIndex Int                              @default(1)
+  currentDayIndex  Int                              @default(1)
+  completedAt      DateTime?
+  createdAt        DateTime                         @default(now())
+  updatedAt        DateTime                         @updatedAt
+  states           ProgramEnrollmentExerciseState[]
+  dayLogs          ProgramEnrollmentDayLog[]
+
+  @@index([userId, status])
+  @@index([programId])
+}
+
+// One row per progression key. Exercise ids are plain columns (no FK) so an
+// enrollment survives the deletion of a custom exercise; the start flow asks
+// the user to swap a missing exercise instead.
+model ProgramEnrollmentExerciseState {
+  id                 Int               @id @default(autoincrement())
+  enrollment         ProgramEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  enrollmentId       Int
+  progressionKey     String
+  exerciseId         Int
+  originalExerciseId Int
+  workingWeight      Float?
+  trainingMax        Float?
+  e1rm               Float?
+  stageIndex         Int               @default(0)
+  consecutiveFails   Int               @default(0)
+  // Reps-only double progression (bodyweight work): added to the rows' range.
+  repsOffset         Int               @default(0)
+  roundingKg         Float?
+  updatedAt          DateTime          @updatedAt
+
+  @@unique([enrollmentId, progressionKey])
+}
+
+model ProgramEnrollmentDayLog {
+  id           Int                 @id @default(autoincrement())
+  enrollment   ProgramEnrollment   @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  enrollmentId Int
+  cycle        Int
+  weekIndex    Int
+  dayIndex     Int
+  // Id of the day inside the enrollment snapshot.
+  programDayId Int
+  dayName      String
+  status       ProgramDayLogStatus
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime            @default(now())
+  workout      Workout?
+
+  @@unique([enrollmentId, cycle, weekIndex, dayIndex])
+}
+
+enum ProgramGoal {
+  STRENGTH
+  HYPERTROPHY
+  GENERAL_FITNESS
+  POWERLIFTING
+  ENDURANCE
+  ATHLETIC
+}
+
+enum ProgramLevel {
+  BEGINNER
+  NOVICE
+  INTERMEDIATE
+  ADVANCED
+  ELITE
+}
+
+enum ProgramScheduleMode {
+  SEQUENCE
+  CALENDAR
+}
+
+enum ProgramDurationMode {
+  FIXED
+  OPEN_ENDED
+}
+
+enum ProgramVisibility {
+  PRIVATE
+  SYSTEM
+}
+
+enum EffortScale {
+  RPE
+  RIR
+}
+
+enum ProgressionStrategy {
+  NONE
+  LINEAR
+  DOUBLE
+  PERCENT_TM
+  RPE
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  COMPLETED
+  ABANDONED
+}
+
+enum ProgramDayLogStatus {
+  STARTED
+  COMPLETED
+  SKIPPED
 }

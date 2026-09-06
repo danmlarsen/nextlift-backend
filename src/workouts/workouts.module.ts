@@ -6,9 +6,10 @@ import { WorkoutSetService } from './workout-set.service';
 import { WorkoutQueryService } from './workout-query.service';
 import { WorkoutManagementService } from './workout-management.service';
 import { PersonalRecordsModule } from 'src/personal-records/personal-records.module';
+import { ProgramsModule } from 'src/programs/programs.module';
 
 @Module({
-  imports: [PrismaModule, PersonalRecordsModule],
+  imports: [PrismaModule, PersonalRecordsModule, ProgramsModule],
   providers: [
     WorkoutManagementService,
     WorkoutQueryService,

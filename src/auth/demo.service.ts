@@ -6,6 +6,24 @@ import { Exercise, Prisma, UserType } from '@prisma/client';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PersonalRecordsService } from 'src/personal-records/personal-records.service';
+import { FULL_PROGRAM_INCLUDE } from 'src/programs/const/full-program-include';
+import {
+  collectSlots,
+  initialStateForSlot,
+} from 'src/programs/engine/enrollment-defaults';
+import { totalWeeks } from 'src/programs/engine/schedule';
+import { toSnapshot } from 'src/programs/utils/program-snapshot';
+
+// Curated program (prisma/data/programs) demo accounts follow from the start.
+const DEMO_PROGRAM_SLUG = 'full-body-linear-3-day';
+// Plausible starting weights per progression key of that program.
+const DEMO_START_WEIGHTS: Record<string, number> = {
+  squat: 60,
+  bench: 40,
+  row: 40,
+  ohp: 30,
+  deadlift: 80,
+};
 
 @Injectable()
 export class DemoService {
@@ -105,9 +123,27 @@ export class DemoService {
     const workoutDates = this.generateRandomWorkoutDates(10);
 
     // Create workouts for each date
+    const workouts: { id: number; startedAt: Date }[] = [];
     for (let i = 0; i < workoutDates.length; i++) {
       const workoutDate = workoutDates[i];
-      await this.createDemoWorkout(userId, exercises, workoutDate, i);
+      const workout = await this.createDemoWorkout(
+        userId,
+        exercises,
+        workoutDate,
+        i,
+      );
+      workouts.push({ id: workout.id, startedAt: workout.startedAt });
+    }
+
+    // Enrolling the demo user shows the program feature straight away; it
+    // must never block the demo session, so failures are only logged.
+    try {
+      await this.enrollDemoUser(userId, workouts);
+    } catch (error: unknown) {
+      this.logger.error(`Failed to enroll demo user in a program`, {
+        userId,
+        error,
+      });
     }
 
     // The seeded workouts bypass the write hooks, so derive the records here;
@@ -120,6 +156,93 @@ export class DemoService {
         error,
       });
     }
+  }
+
+  /**
+   * Enrolls the demo user in the beginner full-body program with the two most
+   * recent seeded workouts recorded as its first two days, so the dashboard
+   * shows a next program workout immediately.
+   */
+  private async enrollDemoUser(
+    userId: number,
+    workouts: { id: number; startedAt: Date }[],
+  ) {
+    const program = await this.prismaService.program.findFirst({
+      where: { userId: -1, slug: DEMO_PROGRAM_SLUG },
+      include: FULL_PROGRAM_INCLUDE,
+    });
+    if (!program) {
+      this.logger.warn(`Demo program not seeded`, { slug: DEMO_PROGRAM_SLUG });
+      return;
+    }
+    const snapshot = toSnapshot(program);
+    const states = collectSlots(snapshot).map((slot) =>
+      initialStateForSlot(slot, {
+        workingWeight: DEMO_START_WEIGHTS[slot.progressionKey] ?? null,
+      }),
+    );
+    const days = snapshot.blocks[0]?.days ?? [];
+    const recent = [...workouts]
+      .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime())
+      .slice(0, Math.min(2, days.length))
+      .reverse();
+    const startDate = new Date(
+      recent[0]?.startedAt ?? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+    );
+    startDate.setUTCHours(0, 0, 0, 0);
+
+    await this.prismaService.$transaction(async (tx) => {
+      const enrollment = await tx.programEnrollment.create({
+        data: {
+          userId,
+          programId: program.id,
+          programVersion: program.version,
+          programName: program.name,
+          totalWeeks: totalWeeks(snapshot),
+          snapshot: snapshot,
+          startDate,
+          // Both days of the rotation are done: the next workout starts cycle 2.
+          currentCycle: recent.length === days.length ? 2 : 1,
+          currentWeekIndex: 1,
+          currentDayIndex:
+            recent.length === days.length ? 1 : recent.length + 1,
+          states: {
+            create: states.map((state) => ({
+              progressionKey: state.progressionKey,
+              exerciseId: state.exerciseId,
+              originalExerciseId: state.exerciseId,
+              workingWeight: state.workingWeight,
+              trainingMax: state.trainingMax,
+              e1rm: state.e1rm,
+              roundingKg: state.roundingKg,
+            })),
+          },
+        },
+      });
+      for (const [index, workout] of recent.entries()) {
+        const day = days[index];
+        const log = await tx.programEnrollmentDayLog.create({
+          data: {
+            enrollmentId: enrollment.id,
+            cycle: 1,
+            weekIndex: 1,
+            dayIndex: index + 1,
+            programDayId: day.id,
+            dayName: day.name,
+            status: 'COMPLETED',
+            startedAt: workout.startedAt,
+            completedAt: workout.startedAt,
+          },
+        });
+        await tx.workout.update({
+          where: { id: workout.id },
+          data: {
+            title: `${program.name} · ${day.name}`,
+            programDayLogId: log.id,
+          },
+        });
+      }
+    });
   }
 
   private generateRandomWorkoutDates(count: number): Date[] {

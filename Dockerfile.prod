@@ -29,10 +29,10 @@ RUN npm install -g pnpm@11.9.0 && \
     pnpm install --frozen-lockfile --prod && \
     pnpm add prisma@6.19.3
 
-# Copy built application, Prisma schema and compiled seed.js
+# Copy built application, Prisma schema and the compiled seed (seed.js + data/)
 COPY --from=builder /app/dist/src ./dist
 COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/dist/prisma/seed.js ./prisma
+COPY --from=builder /app/dist/prisma ./prisma
 
 # Generate Prisma client in production (ensures compatibility)
 RUN npx prisma generate
